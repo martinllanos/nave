@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 32" width="50" height="32">
+  <!-- Fondo blanco con borde -->
+  <rect width="50" height="32" rx="4" fill="#FFFFFF" stroke="#E5E7EB" stroke-width="1"/>
+  <!-- Texto MODO en verde oficial #3A9B45 con tipografía gruesa redondeada -->
+  <text x="25" y="22" 
+        font-family="'Arial Rounded MT Bold', 'Arial Black', Arial, sans-serif" 
+        font-size="13" 
+        font-weight="900" 
+        fill="#3A9B45" 
+        text-anchor="middle" 
+        letter-spacing="0.5">MODO</text>
+</svg>

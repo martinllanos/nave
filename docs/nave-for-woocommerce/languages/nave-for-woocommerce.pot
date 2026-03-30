@@ -1,0 +1,245 @@
+# Copyright (C) 2026 Nave Integrations
+# This file is distributed under the same license as the Nave for WooCommerce plugin.
+msgid ""
+msgstr ""
+"Project-Id-Version: Nave for WooCommerce 1.0.1\n"
+"Report-Msgid-Bugs-To: integraciones@navenegocios.com\n"
+"Last-Translator: Nave Integrations <integraciones@navenegocios.com>\n"
+"Language-Team: Español (Argentina)\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"POT-Creation-Date: 2026-03-03T00:00:00+00:00\n"
+"PO-Revision-Date: 2026-03-03T00:00:00+00:00\n"
+"X-Generator: Nave for WooCommerce\n"
+"X-Domain: nave-for-woocommerce\n"
+"Language: es_AR\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: nave-for-woocommerce.php:80
+msgid "Nave for WooCommerce requiere que WooCommerce esté activo."
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:26
+msgid "Nave"
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:27
+msgid "Pago por redirección usando Nave."
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:36
+msgid "Pagar con Nave"
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:108
+msgid "Habilitar / Deshabilitar"
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:110
+msgid "Habilitar Nave como método de pago"
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:113
+msgid "Título"
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:116
+msgid "Pagá con tarjetas, MODO o QR"
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:118
+msgid "Nombre visible en el checkout del cliente."
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:121
+msgid "Descripción"
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:124
+msgid "¡Aprovechá las promos de tu banco! Pagá con MODO, QR o tus Tarjetas de forma rápida y segura a través de Nave."
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:127
+msgid "Entorno"
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:130
+msgid "Sandbox (pruebas)"
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:131
+msgid "Producción"
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:136
+msgid "Client ID"
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:140
+msgid "Tu Client ID de Nave B2B."
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:143
+msgid "Client Secret"
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:147
+msgid "Tu Client Secret de Nave B2B."
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:150
+msgid "POS ID"
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:154
+msgid "Identificador del punto de venta asignado por Nave."
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:157
+msgid "Duración del pago (segundos)"
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:161
+msgid "Tiempo en segundos que el link de pago estará vigente. Default: 900 (15 min)."
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:165
+msgid "Modo Debug"
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:167
+msgid "Activar logs en WooCommerce -> Estado -> Logs"
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:199
+msgid "Método de pago por redirección via Nave"
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:204
+msgid "Completa Client ID, Client Secret y POS ID para que el método aparezca en el checkout."
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:218
+msgid "Pedido no encontrado. Intentá de nuevo."
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:222
+msgid "[Nave] Iniciando proceso de pago."
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:247
+msgid "⚠️ [Nave] Error al crear la intención de pago. El cliente ve el checkout con un mensaje de error genérico. Detalle técnico: %s"
+msgstr ""
+
+#: src/Gateway/NaveGateway.php:252
+msgid "Ocurrió un error al iniciar el pago con Nave. Por favor, intentá de nuevo."
+msgstr ""
+
+#: src/Bootstrap.php:116
+msgid "Consultar estado en Nave"
+msgstr ""
+
+#: src/Bootstrap.php:155
+msgid "Nave - Estado del Pago"
+msgstr ""
+
+#: src/Bootstrap.php:171
+msgid "Este pedido no usa Nave."
+msgstr ""
+
+#: src/Bootstrap.php:180
+msgid "Iniciado, sin resultado"
+msgstr ""
+
+#: src/Bootstrap.php:181
+msgid "Pago aprobado"
+msgstr ""
+
+#: src/Bootstrap.php:182
+msgid "Pago rechazado"
+msgstr ""
+
+#: src/Bootstrap.php:183
+msgid "Cancelado manualmente"
+msgstr ""
+
+#: src/Bootstrap.php:184
+msgid "Devolución total emitida"
+msgstr ""
+
+#: src/Bootstrap.php:185
+msgid "Reversado pre-liquidación"
+msgstr ""
+
+#: src/Bootstrap.php:186
+msgid "Disputa en proceso"
+msgstr ""
+
+#: src/Bootstrap.php:187
+msgid "Contracargo confirmado"
+msgstr ""
+
+#: src/Bootstrap.php:194
+msgid "ID de intención de pago:"
+msgstr ""
+
+#: src/Bootstrap.php:197
+msgid "Estado de la intención:"
+msgstr ""
+
+#: src/Bootstrap.php:200
+msgid "ID del pago:"
+msgstr ""
+
+#: src/Bootstrap.php:203
+msgid "Estado del pago:"
+msgstr ""
+
+#: src/Bootstrap.php:207
+msgid "Número de operación:"
+msgstr ""
+
+#: src/Bootstrap.php:220
+msgid "Consultando..."
+msgstr ""
+
+#: src/Bootstrap.php:262
+msgid "Número de operación"
+msgstr ""
+
+#: src/Bootstrap.php:265
+msgid "Usá este número para identificar tu pago ante cualquier reclamo."
+msgstr ""
+
+#: src/Bootstrap.php:389
+msgid "Nonce inválido."
+msgstr ""
+
+#: src/Bootstrap.php:393
+msgid "Sin permisos."
+msgstr ""
+
+#: src/Bootstrap.php:398
+msgid "Pedido no encontrado."
+msgstr ""
+
+#: src/Bootstrap.php:404
+msgid "Estado actualizado correctamente."
+msgstr ""
+
+#: src/Bootstrap.php:406
+msgid "No se pudo actualizar. Revisa los logs."
+msgstr ""
+
+#: templates/checkout/payment-fields.php:17
+msgid "Modo Sandbox para pruebas"
+msgstr ""
+
+#: templates/checkout/payment-fields.php:31
+msgid "Serás redirigido a Nave"
+msgstr ""
+
+#: templates/checkout/payment-fields.php:34
+msgid "Completá el pago de forma segura en la plataforma de Nave."
+msgstr ""
