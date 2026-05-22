@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="product_pricelist_view_form_nave" model="ir.ui.view">
+        <field name="name">product.pricelist.view.form.nave</field>
+        <field name="model">product.pricelist</field>
+        <field name="inherit_id" ref="product.product_pricelist_view"/>
+        <field name="arch" type="xml">
+            <xpath expr="//group[@name='pricelist_availability']" position="after">
+                <group name="nave_config" string="Simulador Nave">
+                    <field name="nave_commission_rule_id" options="{'no_create': True}"/>
+                    <field name="is_nave_simulator" invisible="1"/>
+                </group>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="product_pricelist_view_tree_nave" model="ir.ui.view">
+        <field name="name">product.pricelist.view.tree.nave</field>
+        <field name="model">product.pricelist</field>
+        <field name="inherit_id" ref="product.product_pricelist_view_tree"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='company_id']" position="after">
+                <field name="is_nave_simulator" optional="show"/>
+                <field name="nave_commission_rule_id" optional="show"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

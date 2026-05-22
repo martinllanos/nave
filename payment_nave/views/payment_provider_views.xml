@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Vista formulario heredada de payment.provider -->
+    <record id="payment_provider_form_nave" model="ir.ui.view">
+        <field name="name">payment.provider.form.inherit.nave</field>
+        <field name="model">payment.provider</field>
+        <field name="inherit_id" ref="payment.payment_provider_form"/>
+        <field name="arch" type="xml">
+            <!-- Ubicar nuestras credenciales dentro del grupo principal de credenciales de Odoo -->
+            <xpath expr="//group[@name='provider_credentials']" position="inside">
+                <group invisible="code != 'nave'">
+                    <field name="nave_client_id" 
+                           required="code == 'nave' and state != 'disabled'"/>
+                    <field name="nave_client_secret" 
+                           password="True" 
+                           required="code == 'nave' and state != 'disabled'"/>
+                    <field name="nave_pos_id" 
+                           required="code == 'nave' and state != 'disabled'"/>
+                </group>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Plantilla de Redirección automática de Checkout para Odoo 17/18 -->
+    <template id="redirect_form">
+        <!-- 
+            Al hacer clic en "Pagar" en el checkout de Odoo, se renderiza este formulario invisible.
+            t-att-action="api_url" redirige al navegador inmediatamente al Checkout de Nave
+            usando el método GET ya que la intención de pago ya fue creada Server-to-Server.
+        -->
+        <form t-att-action="api_url" method="get">
+            <!-- No se requieren campos ocultos adicionales -->
+        </form>
+    </template>
+
+</odoo>

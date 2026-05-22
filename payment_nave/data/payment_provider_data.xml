@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+
+    <!-- Registro base para el proveedor Nave en estado Deshabilitado por defecto.
+         Los métodos de pago se cargan DESPUÉS de payment_method_data.xml, por lo tanto
+         este archivo siempre debe declararse DESPUÉS de payment_method_data.xml en el manifest. -->
+    <record id="payment_provider_nave" model="payment.provider">
+        <field name="name">Nave</field>
+        <field name="code">nave</field>
+        <field name="redirect_form_view_id" ref="payment_nave.redirect_form"/>
+        <field name="state">disabled</field>
+        <field name="is_published">True</field>
+
+        <!--
+            Métodos de pago vinculados a Nave:
+            - Tarjeta (genérica: Visa, Mastercard, Amex, etc.) — reutiliza global `payment_method_card`
+            - Naranja Crédito — reutiliza global `payment_method_naranja`
+            - QR Interoperable — propio de payment_nave
+            Nota: Visa y Mastercard como sub-métodos se vinculan automáticamente
+                  a través del método primario `card` por la arquitectura de Odoo 18.
+        -->
+        <field name="payment_method_ids"
+               eval="[Command.set([
+                         ref('payment.payment_method_card'),
+                         ref('payment.payment_method_naranja'),
+                         ref('payment_nave.payment_method_nave_qr'),
+                     ])]"
+        />
+    </record>
+
+</odoo>

@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Vista formulario del Wizard de Link de Pago Nave -->
+    <record id="nave_payment_link_wizard_view_form" model="ir.ui.view">
+        <field name="name">nave.payment.link.wizard.form</field>
+        <field name="model">nave.payment.link.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Generar Link de Pago Nave">
+
+                <!-- Alerta: Link generado exitosamente -->
+                <div class="alert alert-success fw-bold"
+                     role="alert"
+                     invisible="not link_generated">
+                    <i class="fa fa-check-circle me-2"/>
+                    Link de pago generado exitosamente. Copielo y compártalo con el cliente.
+                </div>
+
+                <!-- Alerta: Proveedor no configurado -->
+                <div class="alert alert-warning"
+                     role="alert"
+                     invisible="provider_id != False">
+                    <i class="fa fa-exclamation-triangle me-2"/>
+                    No se encontró un proveedor de pago Nave activo para esta compañía.
+                    Configure el proveedor en
+                    <strong>Contabilidad &gt; Configuración &gt; Proveedores de Pago</strong>.
+                </div>
+
+                <group>
+                    <group string="Configuración" name="config_group">
+                        <field name="company_id" invisible="1"/>
+                        <field name="provider_id" widget="many2one_avatar"/>
+                        <field name="partner_id" readonly="1"/>
+                        <field name="currency_id" invisible="1"/>
+                        <field name="external_reference" readonly="1"/>
+                    </group>
+                    <group string="Pago" name="payment_group">
+                        <field name="amount"
+                               readonly="link_generated"/>
+                        <field name="duration_hours"
+                               readonly="link_generated"/>
+                    </group>
+                </group>
+
+                <!-- Campos ocultos del documento fuente -->
+                <field name="move_id" invisible="1"/>
+                <field name="sale_id" invisible="1"/>
+                <field name="link_generated" invisible="1"/>
+                <field name="nave_payment_request_id" invisible="1"/>
+
+                <!-- Sección del Link generado (aparece después de generar) -->
+                <group invisible="not link_generated">
+                    <separator string="Link de Pago Generado"/>
+                    <field name="nave_link"
+                           string="URL de Pago"
+                           widget="url"
+                           readonly="1"/>
+                </group>
+
+                <footer>
+                    <!-- Botón principal: Generar link (visible si aún no se generó) -->
+                    <button name="action_generate_link"
+                            string="Generar Link de Pago"
+                            type="object"
+                            class="btn btn-primary"
+                            invisible="link_generated"
+                            data-hotkey="g"/>
+
+                    <!-- Botón de copiar el link (visible una vez generado) -->
+                    <field name="nave_link"
+                           string="Copiar Link al Portapapeles"
+                           widget="CopyClipboardChar"
+                           readonly="1"
+                           invisible="not link_generated"/>
+
+                    <button string="Cerrar"
+                            class="btn btn-secondary rounded-2"
+                            special="cancel"
+                            data-hotkey="x"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <!-- Acción que abre el wizard -->
+    <record id="action_nave_payment_link_wizard" model="ir.actions.act_window">
+        <field name="name">Generar Link de Pago Nave</field>
+        <field name="res_model">nave.payment.link.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+        <field name="binding_model_id" ref="account.model_account_move"/>
+        <field name="binding_view_types">form</field>
+    </record>
+
+    <!-- Acción también disponible desde Pedidos de Venta -->
+    <record id="action_nave_payment_link_wizard_sale" model="ir.actions.act_window">
+        <field name="name">Generar Link de Pago Nave</field>
+        <field name="res_model">nave.payment.link.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+        <field name="binding_model_id" ref="sale.model_sale_order"/>
+        <field name="binding_view_types">form</field>
+    </record>
+
+</odoo>

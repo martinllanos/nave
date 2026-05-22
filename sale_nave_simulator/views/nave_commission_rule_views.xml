@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Tree View -->
+    <record id="view_nave_commission_rule_tree" model="ir.ui.view">
+        <field name="name">nave.commission.rule.tree</field>
+        <field name="model">nave.commission.rule</field>
+        <field name="arch" type="xml">
+            <tree string="Reglas de Comisión Nave">
+                <field name="name"/>
+                <field name="payment_method_type"/>
+                <field name="bank_id" optional="show"/>
+                <field name="installments"/>
+                <field name="interest_rate" widget="percentage"/>
+                <field name="total_cost_percentage" widget="percentage"/>
+                <field name="fixed_fee"/>
+                <field name="active" widget="boolean_toggle"/>
+            </tree>
+        </field>
+    </record>
+
+    <!-- Form View -->
+    <record id="view_nave_commission_rule_form" model="ir.ui.view">
+        <field name="name">nave.commission.rule.form</field>
+        <field name="model">nave.commission.rule</field>
+        <field name="arch" type="xml">
+            <form string="Regla de Comisión Nave">
+                <sheet>
+                    <widget name="web_ribbon" title="Archivado" bg_color="bg-danger" invisible="active"/>
+                    <div class="oe_title">
+                        <label for="name" class="oe_edit_only"/>
+                        <h1>
+                            <field name="name" placeholder="Ej. Visa 3 Cuotas..."/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group name="left_details">
+                            <field name="payment_method_type"/>
+                            <field name="bank_id"/>
+                            <field name="installments"/>
+                            <field name="active" invisible="1"/>
+                        </group>
+                        <group name="right_details">
+                            <field name="interest_rate" widget="percentage"/>
+                            <field name="tax_rate" widget="percentage"/>
+                            <field name="fixed_fee"/>
+                            <field name="total_cost_percentage" widget="percentage" readonly="1" decoration-bf="1"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Action -->
+    <record id="action_nave_commission_rule" model="ir.actions.act_window">
+        <field name="name">Reglas de Comisión Nave</field>
+        <field name="res_model">nave.commission.rule</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+
+    <!-- Menuitem (bajo ventas -> Configuración) -->
+    <menuitem id="menu_nave_commission_rules"
+              name="Reglas Nave"
+              parent="sale.menu_sale_config"
+              action="action_nave_commission_rule"
+              sequence="50"/>
+
+</odoo>

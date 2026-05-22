@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+
+    <!--
+        Métodos de Pago propios de Nave para Argentina (ARS).
+        Estrategia:
+        - Visa y Mastercard reutilizan los registros globales de payment.method (ya existen en el módulo base `payment`).
+        - Naranja Crédito/Débito reutiliza payment_method_naranja existente en el módulo base `payment`.
+        - QR Interoperable Nave es un método propio y exclusivo, definido aquí con su ícono personalizado.
+
+        Todos estos métodos son sub-métodos del método primario `payment_method_card` de Odoo,
+        EXCEPTO el QR Interoperable que es un flujo independiente (wallet/QR).
+    -->
+
+    <!-- =============================================
+         MÉTODO PROPIO: QR Interoperable Nave
+         Flujo: POST /api/payment_request/static_qr
+         País: Argentina | Moneda: ARS
+
+         NOTA: Para usar el ícono personalizado, copiar manualmente:
+           cp /home/martin/.gemini/antigravity/brain/1b23444c-e586-4441-8a02-8329f93faf03/nave_qr_method_icon_1779369832437.png \
+              /home/martin/server/18/nave/payment_nave/static/img/nave_qr.png
+         Mientras tanto usa el ícono QRIS del módulo base como placeholder.
+         ============================================= -->
+    <record id="payment_method_nave_qr" model="payment.method">
+        <field name="name">QR Interoperable Nave</field>
+        <field name="code">nave_qr</field>
+        <field name="sequence">10</field>
+        <field name="active">True</field>
+        <field name="image" type="base64" file="payment/static/img/qris.png"/>
+        <field name="support_tokenization">False</field>
+        <field name="support_express_checkout">False</field>
+        <field name="support_refund">partial</field>
+        <field name="supported_country_ids"
+               eval="[Command.set([
+                         ref('base.ar'),
+                     ])]"
+        />
+        <field name="supported_currency_ids"
+               eval="[Command.set([
+                         ref('base.ARS'),
+                     ])]"
+        />
+    </record>
+
+</odoo>
