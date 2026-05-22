@@ -60,7 +60,4 @@ venv.bak/
 modules_to_install.txt
 
 # Custom exclusions
-tasks/
-.agent/
-docs/
 

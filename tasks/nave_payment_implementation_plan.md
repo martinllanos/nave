@@ -27,7 +27,7 @@ graph LR
     A --> C( Módulo pos_nave <br> Pagos Presenciales)
     C --> C1[Nave Point <br> Terminal Físico]
     C1 -.-> C1_1( /api/payment_request/smart_pos )
-    C --> C2[QR Interoperable <br> Pantalla Caja]
+    C --> C2[QR Interoperable <br> QR Físico de Caja]
     C2 -.-> C2_1( /api/payment_request/static_qr )
     C --> C3[Cliente JS OWL 2.0 <br> Fetch / Polling]
 
@@ -103,8 +103,8 @@ Clase en escrita Javascript (OWL 2) (`/** @odoo-module */`) que hereda de `Payme
 1.  **Auth**: `POST /security-ms/api/security/auth0/b2b/m2msPrivate` para obtener Bearer token (cacheado en sesión).
 2.  **Request Payment (`send_payment_request`)**: 
     - Dependiendo de la configuración del método, dispara:
-    - **Nave Point**: `POST /api/payment_request/smart_pos` enviando `amount`, `pos_id`, `external_reference`. El terminal físico del mostrador reaccionará automáticamente.
-    - **QR Estático/Dinámico**: `POST /api/payment_request/static_qr`.
+    - **Nave Point (Smart POS)**: `POST /api/payment_request/smart_pos` enviando `amount`, `pos_id`, `external_reference`. El terminal físico reaccionará automáticamente.
+    - **QR Interoperable (Físico/Caja)**: `POST /api/payment_request/static_qr` enviando `seller.pos_id`, `transactions.qr_amount="close"`, y el monto en string (`amount.value`). El cliente escanea el QR físico de la caja/mostrador y el pago se procesa asíncronamente.
 3.  **Polling Loop**: Consulta periódica a `GET /api/payment_requests/{payment_request_id}` o `GET /ranty-payments/payments/{payment_id}` para evaluar si el estado pasa de `OPEN` a `APPROVED` / `CLOSED`. (Ideal: Si Odoo Server expone el Webhook a JS, evitamos el polling puro constante).
 4.  **Cancelación**: Llamada a `DELETE /api/payments/{payment_id}` si está en `APPROVED`, o `DELETE /api/payment_requests/{payment_request_id}` si la intención sigue abierta.
 #### [NEW] pos_nave/static/src/app/payment_nave_templates.xml
@@ -112,14 +112,15 @@ Elementos visuales OWL (carteles temporales, renderización de QR en pantalla si
 
 ---
 
-## Verification Plan
+### Verification Plan
 ### Automated & API Tests
 - Levantar un mock/script temporal en `/tmp/` para simular llamadas al Webhook de `/payment/nave/webhook` y validar la correcta conciliación del asiento contable a "Pagado" sin necesidad de tarjetas reales.
 - Escribir scripts simples de python que hagan PING/Auth a la cuenta Sandbox de Nave utilizando los algoritmos extraídos del module WooCommerce para certificar credenciales.
+- **[NUEVO] Simulación de QR Físico:** Utilizar el endpoint oficial de simulación Sandbox de Nave: `GET https://api-sandbox.ranty.io/instore/external/resolve?data={QR_FIJO}&access_token={ACCESS_TOKEN_FIJO}` para automatizar y simular el flujo completo del escaneo del cliente directamente en nuestros tests de integración.
   
 ### Manual Verification
 - **Online**: Desde el entorno Odoo (localhost), comprar un producto en website, ir a pantalla de checkout, pagar con tarjeta de prueba en entorno Nave Sandbox, retornar a odoo y observar Invoice en estado "In Payment" o "Paid".
-- **Presencial (Posible Mock)**: Ya que no contamos con el hardware, inyectaré en `payment_nave.js` un "Dev Mode" toggle que emule la respuesta del hardware (10 segundos de demora emulada -> Responde "Aprobado") para simular el ciclo completo del POS en el frontend y validar que Odoo lo contabiliza.
+- **Presencial (Posible Mock)**: Ya que no contamos con el hardware Nave Point físico, inyectaré en `payment_nave.js` un "Dev Mode" toggle que emule la respuesta del hardware o utilice el endpoint `/instore/external/resolve` en Sandbox para emular que un cliente escanea el QR del POS, validando todo el ciclo y su respectiva conciliación.
 
 ### Soporte Técnico
 Para escalar consultas técnicas detalladas (por ejemplo, habilitación de endpoints Server-to-Server para tokenización y pagos recurrentes por backend), utilizaremos el portal oficial de **Helpdesk de Nave**:
