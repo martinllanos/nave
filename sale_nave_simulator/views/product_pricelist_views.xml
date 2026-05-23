@@ -5,7 +5,7 @@
         <field name="model">product.pricelist</field>
         <field name="inherit_id" ref="product.product_pricelist_view"/>
         <field name="arch" type="xml">
-            <xpath expr="//group[@name='pricelist_availability']" position="after">
+            <xpath expr="//field[@name='country_group_ids']/.." position="after">
                 <group name="nave_config" string="Simulador Nave">
                     <field name="nave_commission_rule_id" options="{'no_create': True}"/>
                     <field name="is_nave_simulator" invisible="1"/>
