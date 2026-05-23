@@ -1,6 +1,10 @@
 # Manual de Configuración y Pruebas - Nave Checkout (Fase 2)
 
+> **Rama de trabajo:** `18.0-dev-mat` — despliegue y pruebas en Odoo.sh: ver [Despliegue Odoo.sh - payment_nave](odoo_sh_nave_deploy.md).
+
 Este manual te guiará paso a paso para configurar el proveedor de pagos **Nave** en tu base de datos de Odoo 18 y realizar tu primera prueba de cobro con una factura real.
+
+**Nota:** el wizard **Generar Link de Pago** crea un registro `payment.transaction` en Odoo para reconciliar el cobro con la factura (igual que el flujo del portal).
 
 ---
 
@@ -51,13 +55,22 @@ Nave en su entorno de Sandbox espera procesar operaciones en **Pesos Argentinos 
 
 1. Navegá a **Ventas** o **Contabilidad** y creá una nueva **Factura (Invoice)** a nombre de tu cliente de prueba.
 2. Agregá un producto (Ej: Servicio por $1500) y confirmá la factura.
-3. Hacé clic en el botón **Vista Previa (Preview)** o envíale el link al cliente.
+3. Hacé clic en el botón **Vista Previa (Preview)** o enviale el link al cliente.
 4. Odoo te mostrará el portal del cliente con la factura.
 5. Hacé clic en el botón **Pagar Ahora (Pay Now)**.
 6. En la lista de opciones de pago, debería aparecer **Nave**. Seleccionalo.
 7. Al hacer clic en **Pagar**, Odoo generará la intención de pago (Payment Intent) en segundo plano y te **redirigirá al entorno de Sandbox de Nave Checkout**.
 8. En la pantalla de Nave, ingresá datos de tarjeta de prueba (Nave te debería haber provisto tarjetas de crédito/débito ficticias para Sandbox) y completá el flujo.
 9. Al finalizar, Nave te va a redirigir automáticamente de nuevo a Odoo, donde la factura debería figurar como **En Proceso** o **Pagada** (dependiendo de si el Webhook de Nave ya llegó y se procesó).
+
+### Criterios de éxito (Prueba 1)
+
+En **Contabilidad > Configuración > Transacciones de Pago** (modo desarrollador), la transacción asociada debe cumplir:
+
+- **Estado:** `done` (o equivalente *Hecho* / pagado).
+- **Referencia del proveedor (`provider_reference`):** completada con el identificador devuelto por Nave (payment intent / operación).
+
+Si la factura no queda pagada pero la transacción cumple lo anterior, revisá webhooks y logs `[payment_nave]`.
 
 ---
 
@@ -68,7 +81,7 @@ Esta es la funcionalidad personalizada que armamos en `payment_nave`.
 1. Con la factura anterior (o una nueva ya confirmada), andá a la vista de formulario en el backend (Contabilidad o Ventas).
 2. Hacé clic en el botón **Generar Link de Pago (Generate Payment Link)**.
 3. Odoo te abrirá el Wizard estándar modificado. Asegurate de seleccionar a **Nave** como proveedor.
-4. Hacé clic en generar.
+4. Hacé clic en generar. Se crea un `payment.transaction` vinculado a la factura.
 5. Te va a entregar un link (Ej: `https://checkout.ranty.io/link/...`). 
 6. Abrí ese link en una pestaña de incógnito para simular ser el cliente. Vas a ver el checkout directo de Nave.
 

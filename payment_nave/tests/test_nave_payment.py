@@ -29,6 +29,9 @@ class TestNaveProvider(PaymentCommon):
             'nave_client_id': 'test_client_id_12345',
             'nave_client_secret': 'test_client_secret_xyz',
             'nave_pos_id': 'pos-test-uuid-001',
+            'payment_method_ids': [
+                (6, 0, [cls.env.ref('payment.payment_method_card').id]),
+            ],
         })
 
         cls.currency_ars = cls.env.ref('base.ARS')
@@ -101,29 +104,16 @@ class TestNaveProvider(PaymentCommon):
     # 2. TRANSACCIONES — CREACIÓN DE INTENCIÓN
     # ──────────────────────────────────────────────
 
-    @patch('odoo.addons.payment_nave.models.payment_provider.requests.post')
-    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.post')
-    def test_04_checkout_creates_payment_intent(self, mock_tx_post, mock_auth_post):
+    @patch('odoo.addons.payment_nave.models.payment_provider.PaymentProvider._nave_make_request')
+    def test_04_checkout_creates_payment_intent(self, mock_make_request):
         """Verifica que _get_specific_rendering_values crea correctamente una intención en Nave."""
-        
-        def mock_post_side_effect(url, *args, **kwargs):
-            if 'auth0' in url:
-                return MagicMock(
-                    json=MagicMock(return_value={'access_token': 'tok_test', 'expires_in': 3600}),
-                    raise_for_status=MagicMock(return_value=None),
-                )
-            else:
-                return MagicMock(
-                    json=MagicMock(return_value={'id': 'pr-nave-001', 'checkout_url': 'https://checkout.ranty.io/pay/pr-nave-001'}),
-                    raise_for_status=MagicMock(return_value=None),
-                )
-                
-        mock_tx_post.side_effect = mock_post_side_effect
-        mock_auth_post.side_effect = mock_post_side_effect
-
+        mock_make_request.return_value = {
+            'id': 'pr-nave-001',
+            'checkout_url': 'https://checkout.ranty.io/pay/pr-nave-001',
+        }
         self.nave_provider.write({
-            'nave_access_token': False,
-            'nave_token_expiry': False,
+            'nave_access_token': 'tok_test',
+            'nave_token_expiry': '2099-01-01 00:00:00',
         })
 
         tx = self.env['payment.transaction'].create({
@@ -146,18 +136,15 @@ class TestNaveProvider(PaymentCommon):
     # 3. WEBHOOKS — PROCESAMIENTO SEGURO
     # ──────────────────────────────────────────────
 
-    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
-    def test_05_webhook_approved_sets_done(self, mock_get):
+    @patch('odoo.addons.payment_nave.models.payment_provider.PaymentProvider._nave_make_request')
+    def test_05_webhook_approved_sets_done(self, mock_make_request):
         """Verifica que un webhook APPROVED con GET de validación concilia la transacción."""
-        mock_get.return_value = MagicMock(
-            json=MagicMock(return_value={
-                'id': 'pay-nave-approved-001',
-                'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
-                'wallet': {'name': 'mercado pago'},
-                'amount': {'currency': 'ARS', 'value': '1500.00'},
-            }),
-            raise_for_status=MagicMock(return_value=None),
-        )
+        mock_make_request.return_value = {
+            'id': 'pay-nave-approved-001',
+            'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
+            'wallet': {'name': 'mercado pago'},
+            'amount': {'currency': 'ARS', 'value': '1500.00'},
+        }
         self.nave_provider.write({
             'nave_access_token': 'tok_test',
             'nave_token_expiry': self.env['payment.provider']._fields['nave_token_expiry'].from_string('2099-01-01 00:00:00'),
@@ -183,18 +170,16 @@ class TestNaveProvider(PaymentCommon):
         self.assertEqual(tx.state, 'done',
                          "La transacción debería pasar a 'done' tras un webhook APPROVED verificado.")
         self.assertEqual(tx.nave_payment_id, 'pay-nave-approved-001')
+        self.assertEqual(tx.provider_reference, 'pay-nave-approved-001')
 
-    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
-    def test_06_webhook_rejected_cancels_tx(self, mock_get):
+    @patch('odoo.addons.payment_nave.models.payment_provider.PaymentProvider._nave_make_request')
+    def test_06_webhook_rejected_cancels_tx(self, mock_make_request):
         """Verifica que un webhook REJECTED cancela la transacción en Odoo."""
-        mock_get.return_value = MagicMock(
-            json=MagicMock(return_value={
-                'id': 'pay-nave-rejected-001',
-                'status': {'name': 'REJECTED', 'reason_code': 'insufficient_funds'},
-                'amount': {'currency': 'ARS', 'value': '1500.00'},
-            }),
-            raise_for_status=MagicMock(return_value=None),
-        )
+        mock_make_request.return_value = {
+            'id': 'pay-nave-rejected-001',
+            'status': {'name': 'REJECTED', 'reason_code': 'insufficient_funds'},
+            'amount': {'currency': 'ARS', 'value': '1500.00'},
+        }
         self.nave_provider.write({
             'nave_access_token': 'tok_test',
             'nave_token_expiry': self.env['payment.provider']._fields['nave_token_expiry'].from_string('2099-01-01 00:00:00'),
@@ -223,13 +208,10 @@ class TestNaveProvider(PaymentCommon):
     # 4. REEMBOLSOS
     # ──────────────────────────────────────────────
 
-    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.delete')
-    def test_07_refund_calls_nave_delete(self, mock_delete):
-        """Verifica que _execute_refund invoca DELETE /api/payments/{id} en Nave."""
-        mock_delete.return_value = MagicMock(
-            json=MagicMock(return_value={'status': 'CANCELLING'}),
-            raise_for_status=MagicMock(return_value=None),
-        )
+    @patch('odoo.addons.payment_nave.models.payment_provider.PaymentProvider._nave_make_request')
+    def test_07_refund_calls_nave_delete(self, mock_make_request):
+        """Verifica que _send_refund_request invoca DELETE /api/payments/{id} en Nave."""
+        mock_make_request.return_value = {'status': 'CANCELLING'}
         self.nave_provider.write({
             'nave_access_token': 'tok_test',
             'nave_token_expiry': self.env['payment.provider']._fields['nave_token_expiry'].from_string('2099-01-01 00:00:00'),
@@ -248,24 +230,22 @@ class TestNaveProvider(PaymentCommon):
 
         tx._send_refund_request()
 
-        self.assertTrue(mock_delete.called, "Debería haberse llamado al endpoint DELETE de Nave")
-        call_url = mock_delete.call_args[0][0]
-        self.assertIn('pay-nave-to-refund', call_url)
+        mock_make_request.assert_called_once()
+        call_args = mock_make_request.call_args
+        self.assertEqual(call_args[1]['method'], 'DELETE')
+        self.assertIn('pay-nave-to-refund', call_args[0][0])
 
     # ──────────────────────────────────────────────
     # 5. WIZARD DE LINK DE PAGO
     # ──────────────────────────────────────────────
 
-    @patch('odoo.addons.payment_nave.models.nave_link_wizard.requests.post')
-    def test_08_link_wizard_generates_nave_url(self, mock_post):
-        """Verifica que el wizard genera un link real de Nave invocando la API correcta."""
-        mock_post.return_value = MagicMock(
-            json=MagicMock(return_value={
-                'id': 'pr-link-001',
-                'checkout_url': 'https://checkout.ranty.io/link/pr-link-001',
-            }),
-            raise_for_status=MagicMock(return_value=None),
-        )
+    @patch('odoo.addons.payment_nave.models.payment_provider.PaymentProvider._nave_make_request')
+    def test_08_link_wizard_generates_nave_url(self, mock_make_request):
+        """Verifica que el wizard crea payment.transaction y genera el link en Nave."""
+        mock_make_request.return_value = {
+            'id': 'pr-link-001',
+            'checkout_url': 'https://checkout.ranty.io/link/pr-link-001',
+        }
         self.nave_provider.write({
             'nave_access_token': 'tok_test',
             'nave_token_expiry': self.env['payment.provider']._fields['nave_token_expiry'].from_string('2099-01-01 00:00:00'),
@@ -285,11 +265,18 @@ class TestNaveProvider(PaymentCommon):
 
         self.assertEqual(wizard.nave_link, 'https://checkout.ranty.io/link/pr-link-001')
         self.assertTrue(wizard.link_generated)
+        self.assertTrue(wizard.payment_transaction_id)
+        self.assertEqual(
+            wizard.payment_transaction_id.reference,
+            'INV-2026-0001',
+        )
 
-        # Verificar que se llamó al endpoint correcto (payment_link, no ecommerce)
-        call_url = mock_post.call_args[0][0]
-        self.assertIn('payment_link', call_url,
-                      "El wizard debe usar el endpoint /payment_link, no /ecommerce")
+        mock_make_request.assert_called_once()
+        self.assertIn(
+            'payment_link',
+            mock_make_request.call_args[0][0],
+            "El wizard debe usar el endpoint /payment_link, no /ecommerce",
+        )
 
     def test_09_link_wizard_amount_validation(self):
         """Verifica que el wizard rechaza montos menores o iguales a 0."""
