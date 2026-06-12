@@ -14,6 +14,7 @@
                 <field name="interest_rate" widget="percentage"/>
                 <field name="total_cost_percentage" widget="percentage"/>
                 <field name="fixed_fee"/>
+                <field name="company_id" groups="base.group_multi_company" optional="show"/>
                 <field name="active" widget="boolean_toggle"/>
             </list>
         </field>
@@ -38,6 +39,7 @@
                             <field name="payment_method_type"/>
                             <field name="bank_id"/>
                             <field name="installments"/>
+                            <field name="company_id" groups="base.group_multi_company" options="{'no_create': True}"/>
                             <field name="active" invisible="1"/>
                         </group>
                         <group name="right_details">

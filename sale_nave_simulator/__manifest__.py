@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 {
-    'name': 'Simulador de Cuotas Nave',
+    'name': 'Simulador Cuotas Nave',
     'version': '18.0.1.0.0',
     'category': 'Sales/Sales',
     'summary': 'Simulador de cuotas y listas de precio para Nave',
@@ -12,6 +12,7 @@
     'depends': ['sale_management', 'product', 'payment_nave'],
     'data': [
         'security/ir.model.access.csv',
+        'security/nave_commission_rule_security.xml',
         'views/nave_commission_rule_views.xml',
         'views/product_pricelist_views.xml',
     ],
