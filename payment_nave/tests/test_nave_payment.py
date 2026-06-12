@@ -105,7 +105,7 @@ class TestNaveProvider(PaymentCommon):
     @patch('odoo.addons.payment_nave.models.payment_transaction.requests.post')
     def test_04_checkout_creates_payment_intent(self, mock_tx_post, mock_auth_post):
         """Verifica que _get_specific_rendering_values crea correctamente una intención en Nave."""
-        
+
         def mock_post_side_effect(url, *args, **kwargs):
             if 'auth0' in url:
                 return MagicMock(
@@ -117,7 +117,7 @@ class TestNaveProvider(PaymentCommon):
                     json=MagicMock(return_value={'id': 'pr-nave-001', 'checkout_url': 'https://checkout.ranty.io/pay/pr-nave-001'}),
                     raise_for_status=MagicMock(return_value=None),
                 )
-                
+
         mock_tx_post.side_effect = mock_post_side_effect
         mock_auth_post.side_effect = mock_post_side_effect
 
