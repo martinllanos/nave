@@ -221,8 +221,28 @@ class NavePaymentLinkWizard(models.TransientModel):
             ))
         except requests.exceptions.RequestException as e:
             _logger.error("[payment_nave] Error al generar link de pago en Nave: %s", e)
+            error_details = str(e)
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    response_json = e.response.json()
+                    if isinstance(response_json, dict):
+                        msg = (
+                            response_json.get('message') or 
+                            response_json.get('error') or 
+                            response_json.get('description')
+                        )
+                        validation_errors = response_json.get('errors') or response_json.get('validation_errors')
+                        if msg:
+                            error_details = f"{msg} (HTTP {e.response.status_code})"
+                        if validation_errors:
+                            error_details += f" - Detalle: {validation_errors}"
+                except Exception:
+                    try:
+                        error_details = f"{e.response.text[:200]} (HTTP {e.response.status_code})"
+                    except Exception:
+                        pass
             raise UserError(_(
-                "Error de comunicación con Nave al generar el link de pago. Detalle: %s", str(e)
+                "Error de comunicación con Nave al generar el link de pago. Detalle: %s", error_details
             ))
 
         checkout_url = data.get('checkout_url')

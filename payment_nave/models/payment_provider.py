@@ -90,9 +90,26 @@ class PaymentProvider(models.Model):
             data = response.json()
         except requests.exceptions.RequestException as e:
             _logger.error("Error al autenticar con Nave Auth0: %s", e)
+            error_details = str(e)
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    response_json = e.response.json()
+                    if isinstance(response_json, dict):
+                        msg = (
+                            response_json.get('message') or 
+                            response_json.get('error') or 
+                            response_json.get('description') or
+                            response_json.get('error_description')
+                        )
+                        if msg:
+                            error_details = f"{msg} (HTTP {e.response.status_code})"
+                except Exception:
+                    try:
+                        error_details = f"{e.response.text[:200]} (HTTP {e.response.status_code})"
+                    except Exception:
+                        pass
             raise UserError(_(
-                "No se pudo establecer conexión con Nave para la autenticación. "
-                "Por favor verifique las credenciales e intente de nuevo."
+                "No se pudo establecer conexión con Nave para la autenticación. Detalle: %s", error_details
             ))
 
         access_token = data.get('access_token')
