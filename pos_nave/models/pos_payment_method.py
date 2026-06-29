@@ -91,7 +91,27 @@ class PosPaymentMethod(models.Model):
             return data
         except requests.exceptions.RequestException as e:
             _logger.error("[pos_nave] Error enviando pago a la terminal Nave: %s", e)
-            return {'error': True, 'message': str(e)}
+            error_details = str(e)
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    response_json = e.response.json()
+                    if isinstance(response_json, dict):
+                        msg = (
+                            response_json.get('message') or 
+                            response_json.get('error') or 
+                            response_json.get('description')
+                        )
+                        validation_errors = response_json.get('errors') or response_json.get('validation_errors')
+                        if msg:
+                            error_details = f"{msg} (HTTP {e.response.status_code})"
+                        if validation_errors:
+                            error_details += f" - Detalle: {validation_errors}"
+                except Exception:
+                    try:
+                        error_details = f"{e.response.text[:200]} (HTTP {e.response.status_code})"
+                    except Exception:
+                        pass
+            return {'error': True, 'message': error_details}
 
     @api.model
     def nave_check_payment_status(self, payment_method_id, intent_id):
@@ -121,7 +141,24 @@ class PosPaymentMethod(models.Model):
             return data
         except requests.exceptions.RequestException as e:
             _logger.error("[pos_nave] Error consultando estado en Nave: %s", e)
-            return {'error': True, 'message': str(e)}
+            error_details = str(e)
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    response_json = e.response.json()
+                    if isinstance(response_json, dict):
+                        msg = (
+                            response_json.get('message') or 
+                            response_json.get('error') or 
+                            response_json.get('description')
+                        )
+                        if msg:
+                            error_details = f"{msg} (HTTP {e.response.status_code})"
+                except Exception:
+                    try:
+                        error_details = f"{e.response.text[:200]} (HTTP {e.response.status_code})"
+                    except Exception:
+                        pass
+            return {'error': True, 'message': error_details}
 
     @api.model
     def nave_cancel_payment_intent(self, payment_method_id, intent_id):
