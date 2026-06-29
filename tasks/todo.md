@@ -35,3 +35,6 @@
 - [x] **[NUEVO]** Vistas ABM para `nave.commission.rule`: Crear interfaces (Tree/Form views y un menú accesible) que permitan a administradores mantener y actualizar dinámicamente las tasas de interés y comisiones sin tocar código.
 - [ ] Motor predictivo: Script Python/ORM para calcular el precio final necesario para que el Payout (Neto) iguale el precio base del producto.
 - [ ] Integración UI Backend: Modificación en vista de Listas de Precios (Form/List) para previsualizar el impacto del recargo financiero y seleccionar la regla.
+
+## Pendientes / Mejoras a Futuro
+- [ ] Analizar y definir el flujo/duración de los links de pago de Nave para facturas recurrentes de suscripción (evitando la expiración de 24 horas del enlace si el cliente demora en pagar).
