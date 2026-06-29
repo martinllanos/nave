@@ -29,7 +29,7 @@
                 <group>
                     <group string="Configuración" name="config_group">
                         <field name="company_id" invisible="1"/>
-                        <field name="provider_id" widget="many2one_avatar"/>
+                        <field name="provider_id"/>
                         <field name="partner_id" readonly="1"/>
                         <field name="currency_id" invisible="1"/>
                         <field name="external_reference" readonly="1"/>

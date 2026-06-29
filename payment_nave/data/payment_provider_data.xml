@@ -10,6 +10,7 @@
         <field name="redirect_form_view_id" ref="payment_nave.redirect_form"/>
         <field name="state">disabled</field>
         <field name="is_published">True</field>
+        <field name="image_128" type="base64" file="payment_nave/static/description/icon.png"/>
 
         <!--
             Métodos de pago vinculados a Nave:
