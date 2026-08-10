@@ -45,35 +45,52 @@ class PosPaymentMethod(models.Model):
     @api.model
     def nave_send_payment_intent(self, payment_method_id, amount, reference):
         """
-        Llamada desde el JS del POS para enviar una solicitud de cobro a la terminal.
+        Llamada desde el JS del POS para enviar una solicitud de cobro a la terminal Smart POS.
+        Endpoint: POST /api/payment_request/smart_pos
         """
         if not self.env.user.has_group('point_of_sale.group_pos_user'):
             raise AccessError(_("No tienes permisos para enviar solicitudes a Nave."))
 
         payment_method = self.browse(payment_method_id)
-        if not payment_method.nave_terminal_id:
-            raise UserError(_("El método de pago no tiene configurado un ID de terminal Nave."))
 
         provider = payment_method._get_nave_payment_provider()
         token = provider._nave_get_access_token()
-        base_url = "https://e3-api.ranty.io" if provider.state == 'test' else "https://e3-api.naranjax.com"
+        base_url = "https://e3-api.ranty.io" if provider.state == 'test' else "https://api.ranty.io"
 
-        # El endpoint para mandar el pago al Smart POS en Nave (según doc)
-        # Asumiendo un endpoint de Intención de pago presencial (Instore API)
-        # La documentación indica POST /instore/payment_intents
-        api_url = f"{base_url}/instore/payment_intents"
-
-        # El amount debe ser string con 2 decimales
+        api_url = f"{base_url}/api/payment_request/smart_pos"
         formatted_amount = f"{amount:.2f}"
 
+        # El ID de la terminal (device_id) se envía en seller.pos_id, usando la terminal del método o el POS ID global
+        pos_id = payment_method.nave_terminal_id or provider.nave_pos_id
+
+        if not pos_id:
+            raise UserError(_("No se ha configurado un ID de terminal Nave ni en el método de pago ni en el proveedor."))
+
         payload = {
-            'device_id': payment_method.nave_terminal_id,
-            'external_reference': reference,
-            'amount': {
-                'currency': 'ARS',
-                'value': formatted_amount
+            'external_payment_id': str(reference)[:36],
+            'seller': {
+                'pos_id': pos_id,
             },
-            'pos_id': provider.nave_pos_id
+            'transactions': [
+                {
+                    'amount': {
+                        'currency': 'ARS',
+                        'value': formatted_amount,
+                    },
+                    'products': [
+                        {
+                            'name': f'Venta POS {reference[:10]}',
+                            'description': 'Cobro en Punto de Venta Odoo',
+                            'quantity': 1,
+                            'unit_price': {
+                                'currency': 'ARS',
+                                'value': formatted_amount,
+                            }
+                        }
+                    ]
+                }
+            ],
+            'duration_time': 300
         }
 
         headers = {
@@ -82,7 +99,7 @@ class PosPaymentMethod(models.Model):
             'Accept': 'application/json',
         }
 
-        _logger.info("[pos_nave] Enviando intención de pago a la terminal %s (Ref: %s)", payment_method.nave_terminal_id, reference)
+        _logger.info("[pos_nave] Enviando solicitud Smart POS a la terminal %s (Ref: %s)", pos_id, reference)
 
         try:
             response = requests.post(api_url, json=payload, headers=headers, timeout=10)
@@ -116,7 +133,8 @@ class PosPaymentMethod(models.Model):
     @api.model
     def nave_check_payment_status(self, payment_method_id, intent_id):
         """
-        Llamada desde el JS del POS (Polling) para consultar el estado del cobro en la terminal.
+        Llamada desde el JS del POS (Polling) para consultar el estado de la intención de pago Smart POS.
+        Endpoint: GET /api/payment_requests/{payment_request_id}
         """
         if not self.env.user.has_group('point_of_sale.group_pos_user'):
             raise AccessError(_("No tienes permisos para consultar solicitudes a Nave."))
@@ -124,10 +142,9 @@ class PosPaymentMethod(models.Model):
         payment_method = self.browse(payment_method_id)
         provider = payment_method._get_nave_payment_provider()
         token = provider._nave_get_access_token()
-        base_url = "https://e3-api.ranty.io" if provider.state == 'test' else "https://e3-api.naranjax.com"
+        base_url = "https://e3-api.ranty.io" if provider.state == 'test' else "https://api.ranty.io"
 
-        # Consultar estado de la intención de pago
-        api_url = f"{base_url}/instore/payment_intents/{intent_id}"
+        api_url = f"{base_url}/api/payment_requests/{intent_id}"
 
         headers = {
             'Authorization': f"Bearer {token}",
@@ -163,7 +180,8 @@ class PosPaymentMethod(models.Model):
     @api.model
     def nave_cancel_payment_intent(self, payment_method_id, intent_id):
         """
-        Llamada desde el JS del POS para cancelar la intención de pago antes de que se apruebe.
+        Llamada desde el JS del POS para dar de baja la intención de pago antes de cobrarla.
+        Endpoint: DELETE /api/payment_requests/{payment_request_id}
         """
         if not self.env.user.has_group('point_of_sale.group_pos_user'):
             raise AccessError(_("No tienes permisos para cancelar solicitudes a Nave."))
@@ -171,17 +189,25 @@ class PosPaymentMethod(models.Model):
         payment_method = self.browse(payment_method_id)
         provider = payment_method._get_nave_payment_provider()
         token = provider._nave_get_access_token()
-        base_url = "https://e3-api.ranty.io" if provider.state == 'test' else "https://e3-api.naranjax.com"
+        base_url = "https://e3-api.ranty.io" if provider.state == 'test' else "https://api.ranty.io"
 
-        api_url = f"{base_url}/instore/payment_intents/{intent_id}/cancel"
+        api_url = f"{base_url}/api/payment_requests/{intent_id}"
 
         headers = {
             'Authorization': f"Bearer {token}",
+            'Content-Type': 'application/json',
             'Accept': 'application/json',
         }
 
+        payload = {
+            'reason': {
+                'code': 'disabled_from_saas',
+                'description': 'Cancelado desde Odoo POS'
+            }
+        }
+
         try:
-            response = requests.post(api_url, headers=headers, timeout=5)
+            response = requests.delete(api_url, json=payload, headers=headers, timeout=5)
             response.raise_for_status()
             return {'success': True}
         except requests.exceptions.RequestException as e:
@@ -191,7 +217,8 @@ class PosPaymentMethod(models.Model):
     @api.model
     def nave_refund_payment(self, payment_method_id, transaction_id, amount):
         """
-        Llamada desde el JS del POS para realizar un reembolso/devolución.
+        Llamada desde el JS del POS para realizar una cancelación/devolución de un pago cobrado.
+        Endpoint: DELETE /api/payments/{payment_id}
         """
         if not self.env.user.has_group('point_of_sale.group_pos_user'):
             raise AccessError(_("No tienes permisos para realizar reembolsos en Nave."))
@@ -199,33 +226,21 @@ class PosPaymentMethod(models.Model):
         payment_method = self.browse(payment_method_id)
         provider = payment_method._get_nave_payment_provider()
         token = provider._nave_get_access_token()
-        base_url = "https://e3-api.ranty.io" if provider.state == 'test' else "https://e3-api.naranjax.com"
+        base_url = "https://e3-api.ranty.io" if provider.state == 'test' else "https://api.ranty.io"
 
-        # El endpoint de reembolsos puede variar según la API (asumimos refund estándar instore)
-        api_url = f"{base_url}/instore/refunds"
-
-        formatted_amount = f"{abs(amount):.2f}"
-
-        payload = {
-            'payment_id': transaction_id,
-            'device_id': payment_method.nave_terminal_id,
-            'amount': {
-                'currency': 'ARS',
-                'value': formatted_amount
-            }
-        }
+        api_url = f"{base_url}/api/payments/{transaction_id}"
 
         headers = {
             'Authorization': f"Bearer {token}",
-            'Content-Type': 'application/json',
             'Accept': 'application/json',
         }
 
         try:
-            response = requests.post(api_url, json=payload, headers=headers, timeout=10)
+            response = requests.delete(api_url, headers=headers, timeout=10)
             response.raise_for_status()
             data = response.json()
             return data
         except requests.exceptions.RequestException as e:
             _logger.error("[pos_nave] Error solicitando reembolso en Nave: %s", e)
             return {'error': True, 'message': str(e)}
+
