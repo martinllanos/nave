@@ -55,7 +55,7 @@ class PosPaymentMethod(models.Model):
 
         provider = payment_method._get_nave_payment_provider()
         token = provider._nave_get_access_token()
-        base_url = "https://e3-api.ranty.io" if provider.state == 'test' else "https://api.ranty.io"
+        base_url = provider._nave_get_api_url()
 
         api_url = f"{base_url}/api/payment_request/smart_pos"
         formatted_amount = f"{amount:.2f}"
@@ -142,7 +142,7 @@ class PosPaymentMethod(models.Model):
         payment_method = self.browse(payment_method_id)
         provider = payment_method._get_nave_payment_provider()
         token = provider._nave_get_access_token()
-        base_url = "https://e3-api.ranty.io" if provider.state == 'test' else "https://api.ranty.io"
+        base_url = provider._nave_get_api_url()
 
         api_url = f"{base_url}/api/payment_requests/{intent_id}"
 
@@ -189,7 +189,7 @@ class PosPaymentMethod(models.Model):
         payment_method = self.browse(payment_method_id)
         provider = payment_method._get_nave_payment_provider()
         token = provider._nave_get_access_token()
-        base_url = "https://e3-api.ranty.io" if provider.state == 'test' else "https://api.ranty.io"
+        base_url = provider._nave_get_api_url()
 
         api_url = f"{base_url}/api/payment_requests/{intent_id}"
 
@@ -226,7 +226,7 @@ class PosPaymentMethod(models.Model):
         payment_method = self.browse(payment_method_id)
         provider = payment_method._get_nave_payment_provider()
         token = provider._nave_get_access_token()
-        base_url = "https://e3-api.ranty.io" if provider.state == 'test' else "https://api.ranty.io"
+        base_url = provider._nave_get_api_url()
 
         api_url = f"{base_url}/api/payments/{transaction_id}"
 
