@@ -31,3 +31,12 @@
     </record>
 
 </odoo>
+
+<!-- Bloque separado noupdate="0" para forzar la escritura del module_id
+     en registros existentes que fueron creados antes de agregar este campo.
+     Sin esto, noupdate="1" impide que Odoo actualice el registro. -->
+<odoo noupdate="0">
+    <record id="payment_provider_nave" model="payment.provider">
+        <field name="module_id" ref="base.module_payment_nave"/>
+    </record>
+</odoo>
