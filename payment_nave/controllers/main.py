@@ -46,7 +46,7 @@ class PaymentNaveController(http.Controller):
         # Delegar el procesamiento al modelo transaction
         # Usar sudo() ya que es una llamada S2S pública
         try:
-            request.env['payment.transaction'].sudo()._handle_notification('nave', data)
+            request.env['payment.transaction'].sudo()._handle_notification_data('nave', data)
         except Exception as e:
             _logger.error("Error al procesar la notificación del Webhook para %s: %s", external_payment_id, e)
             # Responder con HTTP 500 para forzar el reintento de Nave si hubo una falla del lado de Odoo
