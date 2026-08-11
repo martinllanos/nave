@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Proveedor de Pago Nave',
-    'version': '18.0.1.4.1',
+    'version': '18.0.1.4.2',
     'category': 'Accounting/Payment Providers',
     'summary': 'Integración oficial con Nave para cobros online en e-commerce y links de pago.',
     'description': """
