@@ -253,8 +253,13 @@ class PaymentTransaction(models.Model):
 
         # GET seguro para comprobar el estado real de la transacción
         token = self.provider_id._nave_get_access_token()
-        base_url = self.provider_id._nave_get_api_url()
-        check_url = f"{base_url}/ranty-payments/payments/{payment_id}"
+        check_url = notification_data.get('payment_check_url')
+        if check_url:
+            if not check_url.startswith(('http://', 'https://')):
+                check_url = f"https://{check_url}"
+        else:
+            base_url = self.provider_id._nave_get_api_url()
+            check_url = f"{base_url}/ranty-payments/payments/{payment_id}"
 
         headers = {
             'Authorization': f"Bearer {token}",
