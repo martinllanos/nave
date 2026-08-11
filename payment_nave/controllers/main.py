@@ -10,12 +10,21 @@ _logger = logging.getLogger(__name__)
 
 class PaymentNaveController(http.Controller):
 
-    @http.route('/payment/nave/webhook', type='http', auth='public', methods=['POST'], csrf=False)
+    @http.route('/payment/nave/webhook', type='http', auth='public', methods=['POST', 'OPTIONS'], csrf=False)
     def nave_webhook(self):
         """
         Endpoint S2S (Server-to-Server) público que recibe las notificaciones de estado asíncronas de Nave.
         Procesa el payload y actualiza la transacción correspondiente de forma segura.
         """
+        if request.httprequest.method == 'OPTIONS':
+            headers = [
+                ('Content-Type', 'text/plain'),
+                ('Access-Control-Allow-Origin', '*'),
+                ('Access-Control-Allow-Methods', 'POST, OPTIONS'),
+                ('Access-Control-Allow-Headers', 'Content-Type, Authorization'),
+            ]
+            return request.make_response("", headers=headers, status=200)
+
         try:
             data = request.get_json_data() or json.loads(request.httprequest.data.decode('utf-8'))
         except Exception as e:
