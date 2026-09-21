@@ -96,10 +96,10 @@ class PaymentProvider(models.Model):
                     response_json = e.response.json()
                     if isinstance(response_json, dict):
                         msg = (
-                            response_json.get('message') or 
-                            response_json.get('error') or 
-                            response_json.get('description') or
-                            response_json.get('error_description')
+                            response_json.get('message')
+                            or response_json.get('error')
+                            or response_json.get('description')
+                            or response_json.get('error_description')
                         )
                         if msg:
                             error_details = f"{msg} (HTTP {e.response.status_code})"

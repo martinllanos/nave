@@ -114,9 +114,9 @@ class PosPaymentMethod(models.Model):
                     response_json = e.response.json()
                     if isinstance(response_json, dict):
                         msg = (
-                            response_json.get('message') or 
-                            response_json.get('error') or 
-                            response_json.get('description')
+                            response_json.get('message')
+                            or response_json.get('error')
+                            or response_json.get('description')
                         )
                         validation_errors = response_json.get('errors') or response_json.get('validation_errors')
                         if msg:
@@ -164,9 +164,9 @@ class PosPaymentMethod(models.Model):
                     response_json = e.response.json()
                     if isinstance(response_json, dict):
                         msg = (
-                            response_json.get('message') or 
-                            response_json.get('error') or 
-                            response_json.get('description')
+                            response_json.get('message')
+                            or response_json.get('error')
+                            or response_json.get('description')
                         )
                         if msg:
                             error_details = f"{msg} (HTTP {e.response.status_code})"
@@ -243,4 +243,3 @@ class PosPaymentMethod(models.Model):
         except requests.exceptions.RequestException as e:
             _logger.error("[pos_nave] Error solicitando reembolso en Nave: %s", e)
             return {'error': True, 'message': str(e)}
-
