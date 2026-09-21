@@ -135,6 +135,11 @@ class PosPaymentMethod(models.Model):
         """
         Llamada desde el JS del POS (Polling) para consultar el estado de la intención de pago Smart POS.
         Endpoint: GET /api/payment_requests/{payment_request_id}
+
+        OJO: este endpoint devuelve el estado de la INTENCIÓN (PENDING, PROCESSED,
+        SUCCESS_PROCESSED, FAILURE_PROCESSED, DISABLED, EXPIRED, BLOCKED), que NO es el mismo
+        vocabulario que el del PAGO (APPROVED, REJECTED, ...) que devuelve
+        GET /ranty-payments/payments/{payment_id}. El mapeo vive en el JS (NAVE_STATUS).
         """
         if not self.env.user.has_group('point_of_sale.group_pos_user'):
             raise AccessError(_("No tienes permisos para consultar solicitudes a Nave."))
@@ -155,6 +160,9 @@ class PosPaymentMethod(models.Model):
             response = requests.get(api_url, headers=headers, timeout=5)
             response.raise_for_status()
             data = response.json()
+            # Dejamos traza del payload crudo: es la única forma de conocer la forma real de la
+            # respuesta de la intención (la documentación de Nave no la publica).
+            _logger.debug("[pos_nave] Estado de intención %s: %s", intent_id, data)
             return data
         except requests.exceptions.RequestException as e:
             _logger.error("[pos_nave] Error consultando estado en Nave: %s", e)
@@ -199,6 +207,9 @@ class PosPaymentMethod(models.Model):
             'Accept': 'application/json',
         }
 
+        # 'disabled_from_saas' es el código correcto según el catálogo de bajas de Nave
+        # ("Cancelación desde el SAAS por motivo externo"): la baja la origina Odoo, no la terminal.
+        # No confundir con 'manual_disabled_by_user', que es la baja hecha DENTRO de la terminal.
         payload = {
             'reason': {
                 'code': 'disabled_from_saas',
