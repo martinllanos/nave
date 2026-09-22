@@ -333,7 +333,7 @@ Consecuencias para el plan:
 | P3 | Registrar la `notification_url` del lado de Nave | Comercial | ✅ **hecho**. Es **la misma URL para homologación y producción**: `https://www.onlyone.ar/payment/nave/webhook`. Lo que cambia es el estado `test`/`enabled` del provider — ver §3.7 |
 | P4 | Terminal Smart Point física de prueba | Comercial | ⚠️ **recibida (serie `L40000978`) pero NO vinculable**: pide un local "test" que no existe en nuestro portal — ver §3.10 |
 | P13 | Vincular la terminal `L40000978` | Comercial | ⏳ **el código del 2026-08-14 caducó**. Pedido uno nuevo a Nave en el mismo hilo (borrador 2 en `tasks/correo_nave_n9.md`) |
-| P15 | Cargar el `pos_id` de la terminal (`b1c04ade-…`) en el método de pago POS | Técnico | ⬜ |
+| P15 | Cargar el `pos_id` de la terminal (`b1c04ade-…`) en el método de pago POS | Técnico | ⏳ **bloqueado por la sesión POS/00005**, abierta desde el 2026-08-11 con 0 órdenes. Odoo no deja modificar un método de pago con sesiones abiertas: *"Cierre y valide las siguientes sesiones de PdV abiertas antes de modificar este método de pago"* |
 | P12 | 🔴 Obtener de Nave el **`pos_id` (UUID) que corresponde a la terminal `L40000978`** y cargarlo en `nave_terminal_id`. Hoy ese campo tiene `f71ba756-1d80-4ab3-9f43-5dc247fd6c4a`, que es **el mismo UUID que el `nave_pos_id` de e-commerce** del provider — ver §3.5 | Técnico | ⬜ |
 | P5 | Confirmar con Nave el host de sandbox de Smart POS: `e3-api.ranty.io` (doc) vs `api-sandbox.ranty.io` (código) | Técnico | ⬜ |
 | P6 | Confirmar path de auth para QR: `m2ms` vs `m2msPrivate` | Técnico | ⬜ |
@@ -892,6 +892,7 @@ deciden cómo se escribe el fix de B11.
 | C13 | Devolución desde POS | Orden de devolución → Tarjeta | 🚫 Falla por B2/B3 (`REFUND-CIEGO`) | ⬜ |
 | C14 | Webhook de baja de intención | Provocar un `DISABLED` | Es un **segundo contrato de webhook** con payload distinto (`payment_request_id`, `disabled_reason`, `doc_point.md` §8) que el módulo **no maneja** | ⬜ |
 | C15 | Cierre de caja | Cerrar la sesión POS con cobros Nave | Los pagos quedan en el diario del método. No hay conciliación contra Nave | ⬜ |
+| C16 | Cambio de `pos_id` con sesión abierta | Intentar editar el método de pago con una sesión POS abierta | Odoo lo rechaza. **Consecuencia operativa**: no se puede reemplazar una terminal a mitad de turno; hay que cerrar caja primero | ✅ verificado 2026-09-22 |
 
 ### Bloque H — QR interoperable presencial
 
