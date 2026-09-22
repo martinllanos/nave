@@ -47,14 +47,14 @@
   - **Sigue abierto B3**: `line.transaction_id` guarda el id de la intención. Para traer el `payment_id` real hace falta conocer la forma de la respuesta de la intención — se agregó un `_logger.debug` del payload crudo para averiguarla en la primera corrida (S3).
 - [ ] **B1** El wizard de link de pago no crea `payment.transaction` → el webhook no concilia nunca.
 - [ ] **B2** Reembolso POS manda `"REFUND-CIEGO"` hardcodeado: falla siempre.
-- [ ] **B3** El POS guarda el id de la *intención* en `transaction_id`, no el `payment_id` del pago.
+- [x] **B3** *(657b23d)* El POS guarda el id de la *intención* en `transaction_id`, no el `payment_id` del pago. Resuelto: sale de `payment_attempts.payments[]`.
 - [x] **B4** *(resuelto junto con B11)* Polling del POS sin timeout ni manejo de `EXPIRED`/`DISABLED` → loop infinito; única salida "Force done".
 - [ ] **B5** SSRF: `payment_check_url` del webhook se usa sin validar el host → se puede forzar un pago aprobado.
 - [ ] **B6** 🔴 El ciclo de devolución no cierra en **ningún** flujo (confirmado en alcance, D5): botón invisible en backend, `amount_to_refund` ignorado, `_set_canceled` sobre el registro equivocado, y el webhook `REFUNDED`/`CANCELLED` no modifica una tx en `done`. Además `nave_qr` declara `support_refund='partial'` y **Nave confirmó que es `full_only` (N10)**: corregir `data/payment_method_data.xml:33` + script de migración (el archivo es `noupdate="1"`) y declarar `full_only` en `_compute_feature_support_fields`.
 - [ ] **B7** En el checkout sólo se ve el método QR (falta `_get_default_payment_method_codes`).
 - [ ] **B8** QR interoperable presencial: **no implementado y CONFIRMADO EN ALCANCE (D4, 2026-09-21)**. Es desarrollo nuevo: endpoint `/api/payment_request/static_qr`, campo `qr_amount: "close"`, `pos_id` propio por QR físico. Homologable sin hardware vía el endpoint de simulación de sandbox (`doc_qr.md` §10).
 - [ ] **B9** Sin `ir.cron` de respaldo si se pierde el webhook.
-- [ ] **B10** Suite de `pos_nave` desalineada con el código (4 de 5 tests apuntan a endpoints viejos).
+- [x] **B10** *(22ce2f7)* Suite de `pos_nave` desalineada con el código. Reescrita y ampliada: **20 tests en verde** entre `pos_nave` y `payment_nave`.
 
 ### Riesgo de go-live (no bloquea la homologación)
 - [ ] **B12** El ambiente se deriva del `state` del provider y la URL base se recalcula en cada llamada, nunca se guarda en la transacción. Al pasar de `test` a `enabled`: se rompen las devoluciones de pagos de homologación, el token cacheado de sandbox **no se invalida** (hasta 24 h mandando token de sandbox a producción) y las credenciales son un único par de campos. Ver `plan_homologacion_nave.md` §3.7 y el checklist de cutover.
@@ -63,11 +63,14 @@
 - [ ] `tasks/todo.md` Fase 2 tilda "validación estricta de firma/hash" — **Nave no firma sus webhooks**: no está implementado ni es implementable con el contrato actual. La defensa real es el GET de verificación server-side.
 - [ ] Los diagramas de `docs/Modulo Nave - *.md` usan endpoints inexistentes (`/api/v1/checkouts`, `/api/integrations/payment`). El contrato real está en `tasks/doc_*.md`.
 
+### Bug encontrado al correr la suite (2026-09-22)
+- [x] **Migración rota** *(9c7f365)*: `payment_nave/migrations/18.0.1.2.0/end-migrate.py` declaraba `migrate(env)`. Odoo 18 sólo acepta `(cr, version)` y aborta **la carga del registro entera**. Cualquier base con el módulo por debajo de 18.0.1.2.0 no podía instalarlo ni actualizarlo.
+
 ### Documentación oficial actualizada (2026-09-22)
 Relevada del DevPortal de Nave. Detalle en `tasks/plan_homologacion_nave.md` y `tasks/doc_actualizada_2026-09-22.md`.
 - [x] **B11 confirmado por la fuente**: la doc publica las dos tablas de estados por separado. El fix de `81c02c7` queda validado.
-- [ ] 🔴 **B3 destrabado**: la respuesta de la intención trae `payment_attempts.payments[].payment_id`. Ya se puede traer el pago real, guardar el `payment_id` para devoluciones y poblar el ticket (marca, últimos 4, cupón, plan de cuotas).
-- [ ] 🔴 **Host equivocado para Nave Point**: sandbox de Nave Point es `https://e3-api.ranty.io`, no `api-sandbox.ranty.io`. `_nave_get_api_url()` devuelve uno solo para los cuatro flujos. El test `test_pos_nave_payment.py:67` tenía razón; el commit `ffb524b` fue en la dirección equivocada.
+- [x] 🔴 **B3 resuelto** *(657b23d)*: la respuesta de la intención trae `payment_attempts.payments[].payment_id`. Ya se puede traer el pago real, guardar el `payment_id` para devoluciones y poblar el ticket (marca, últimos 4, cupón, plan de cuotas).
+- [x] 🔴 **Host de Nave Point corregido** *(13e4b6a)*: sandbox de Nave Point es `https://e3-api.ranty.io`, no `api-sandbox.ranty.io`. `_nave_get_api_url()` devuelve uno solo para los cuatro flujos. El test `test_pos_nave_payment.py:67` tenía razón; el commit `ffb524b` fue en la dirección equivocada.
 - [ ] 🔴 **N12: el endpoint de devolución desapareció de la doc**. `DELETE /api/payments/{payment_id}` no aparece en ninguna de las cuatro páginas. Preguntar a Nave antes de invertir en B6.
 - [ ] 🟠 **Cancelar intención puede no aplicar a `smart_pos`**: el error de baja lista sólo `payment_link, dynamic_qr, static_qr`. Verificar el caso C4.
 - [ ] 🟠 **`buyer` es opcional**: dejar de mandar `'00000000'` / `'correo@temporal.com'` / `'S/D'` cuando el partner está incompleto.
