@@ -471,6 +471,21 @@ reusando el mismo `external_payment_id` truncado puede ser rechazado.
 
 **i) Estados del link en el panel**: `Aprobado` y `Devuelto`. Vocabulario a contrastar con el de la API.
 
+**j) 🔴 Los códigos de *Tienda online propia* NO son los `pos_id`.** En
+*Integraciones > Tienda online propia* figuran dos tiendas dadas de alta, cada una con un código con
+formato `X-XXXX-XXXX-X`. Ese es el **código de vinculación**: el que se manda por mail a Nave junto
+con el CUIT para que emitan las credenciales (`doc_checkout.md` §1). **No sirve como
+`seller.pos_id`**, que es un UUID.
+
+Los `pos_id` están en otra subsección: **Integraciones > Sistema de gestión**, donde se descarga el
+archivo con los IDs de los puntos de venta. Es la instrucción que repiten las cuatro páginas de la
+documentación vigente.
+
+Dato útil de esa pantalla: hay **dos tiendas registradas**, una para `www.tienda.onlyone.ar` y otra
+para `www.onlyone.ar`. Nuestro Odoo sirve `https://www.onlyone.ar` (`web.base.url` y el website id 3),
+así que la tienda que le corresponde es la segunda. Vale verificar que el `nave_pos_id` cargado en el
+proveedor pertenezca a **esa** tienda y no a la otra: sería otra fuente posible del `INVALID_POS`.
+
 ### 3.8 Devolución: `full_only` (N10 resuelta)
 
 Nave sólo admite devolución **total**. Eso simplifica B6 y obliga a dos cambios concretos:
