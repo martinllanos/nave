@@ -471,6 +471,31 @@ reusando el mismo `external_payment_id` truncado puede ser rechazado.
 
 **i) Estados del link en el panel**: `Aprobado` y `Devuelto`. Vocabulario a contrastar con el de la API.
 
+**k) ✅ Los puntos de venta están en *Negocios > Puntos de venta*, uno por tipo de pago.**
+
+La pantalla (`/business/qr-payments?payment_types=static_qr,smart_pos,ecommerce,without_pos`) lista
+cuatro, y la propia URL enumera los tipos posibles — confirmación directa del error `INVALID_POS`:
+
+| Punto de venta | Referencia | Tipo(s) |
+|---|---|---|
+| WOOCOMMERCE | `www.onlyone.aureofy.net` | ecommerce |
+| **ECOMMERCE** | **`www.onlyone.ar`** | ecommerce ← **el de nuestro Odoo** |
+| Be onlyone Jujuy | Anatuya 15, Jujuy | **Nave Point** + **QR** |
+| Be Onlyone Jujuy QR | Anatuya 15, Jujuy | **QR** |
+
+Entrando a cada uno se obtiene su `pos_id`. El mapeo que corresponde:
+
+| Dónde va en Odoo | Punto de venta del que sale |
+|---|---|
+| `payment.provider.nave_pos_id` (checkout y link) | **ECOMMERCE** (`www.onlyone.ar`) |
+| `pos.payment.method.nave_terminal_id` con terminal `nave` | **Be onlyone Jujuy** → Nave Point |
+| `pos.payment.method.nave_terminal_id` con terminal `nave_qr` | **Be onlyone Jujuy** → QR, o **Be Onlyone Jujuy QR** |
+
+Ojo: hay **dos puntos de venta de e-commerce** (WooCommerce y el nuestro). Verificar que el
+`nave_pos_id` cargado sea el de `www.onlyone.ar` y no el de WooCommerce.
+
+Pendiente de N9: si estos `pos_id` son los productivos, los de sandbox pueden ser otros.
+
 **j) 🔴 Los códigos de *Tienda online propia* NO son los `pos_id`.** En
 *Integraciones > Tienda online propia* figuran dos tiendas dadas de alta, cada una con un código con
 formato `X-XXXX-XXXX-X`. Ese es el **código de vinculación**: el que se manda por mail a Nave junto
