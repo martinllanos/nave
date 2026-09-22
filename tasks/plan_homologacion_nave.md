@@ -839,44 +839,51 @@ Estructura sugerida: `evidencias/<ID_caso>/` con `pantalla.mp4|png`, `odoo.log`,
 
 ## 7. Preguntas abiertas
 
+> 📌 **Actualización 2026-09-22**: se relevó la documentación oficial vigente del DevPortal de Nave.
+> Ver `tasks/doc_actualizada_2026-09-22.md`. Resolvió N2, N3, N5, N9 y N11, confirmó B11, destrabó B3
+> y abrió N12. Los `doc_*.md` locales quedaron marcados como supersedidos.
+
 ### Para Nave (bloquean el arranque)
 
 - **N1** — ¿Cuál es el **checklist oficial de homologación**? Lo que tenemos internamente
   (`docs/Modulo Nave - Cobros Online.md` §Fase 3 y `docs/Modulo Nave - Pagos Presenciales.md`
   §Consideraciones) está prefaciado con *"Probablemente…"*: son **suposiciones nuestras, no
   requisitos confirmados**. Todo el §5 se recalibra con la respuesta.
-- **N2** — Host de sandbox de Smart POS: la doc dice `e3-api.ranty.io`, el código usa
-  `api-sandbox.ranty.io` (cambio deliberado en el commit `ffb524b`, motivo: "Fixes 404"). ¿Cuál es
-  el correcto para homologación?
-- **N3** — Path de auth: `m2msPrivate` en tres docs, `m2ms` en `doc_qr.md` §2, y el plugin oficial
-  usa `m2ms` en sandbox y `m2msPrivate` en producción. Tres fuentes, tres combinaciones.
+- **N2** ✅ **RESUELTA por la doc (2026-09-22)** — Nave Point usa **`https://e3-api.ranty.io`** en
+  sandbox; checkout, link y QR usan `api-sandbox.ranty.io`. Nuestro código usa uno solo para todo, y
+  para Nave Point es el equivocado. El test que esperaba `e3-api` tenía razón.
+- **N3** ✅ **RESUELTA por la doc (2026-09-22)** — Las cuatro páginas usan `m2msPrivate` en sus
+  cuadros de endpoint. Nuestro código está bien.
 - **N4** ✅ **Resuelta por la doc (2026-09-21)** — `doc_qr.md` §8 y `doc_point.md` §7 confirman
   `DELETE {api-base}/api/payments/{payment_id}`, que es exactamente lo que usa el módulo
   (`payment_transaction.py:322`). El host `punku` del plugin de WooCommerce es otra API, no la
   vigente. Queda sólo confirmar si la devolución **parcial** existe: `doc_point.md` §7 dice "total o
   parcial" pero no documenta cómo enviar el monto.
-- **N5** — `PARTIALLY_REFUNDED` aparece como estado de primera clase en el plugin oficial
-  (`OrderStateResolver.php:70,73,87`) pero **no está en la lista de estados de `doc_checkout.md` §5**.
-  ¿Existe? ¿Hay que soportarlo?
+- **N5** ✅ **RESUELTA por la doc (2026-09-22)** — `PARTIALLY_REFUNDED` **no figura** en la tabla de
+  estados de pago vigente. No existe: coherente con N10 (`full_only`).
 - **N6** — Conciliación y settlement: ningún doc define cut-off de lote, liquidación ni archivo de
   conciliación, pero los estados `CANCELLED` ("antes del cierre de lote") y `PURCHASE_REVERSED`
   ("antes de liquidarse") implican un ciclo que no está documentado.
 - **N7** — ¿Hay rate limit de API, límite de monto o límite de intenciones concurrentes?
 - **N8** ✅ **RESUELTA (2026-09-21)** — Trámite hecho. Una sola `notification_url`
   (`https://www.onlyone.ar/payment/nave/webhook`) sirve para ambos ambientes.
+- **N12** 🔴 **NUEVA (2026-09-22)** — **¿Cómo se dispara una devolución por API?** El endpoint
+  `DELETE /api/payments/{payment_id}` que usa nuestro código **ya no aparece en ninguna de las cuatro
+  páginas** de la documentación vigente (verificado: cero ocurrencias de `api/payments/`). Los estados
+  `REFUNDED` y `CANCELLED` siguen existiendo, así que la devolución existe. ¿Sigue vigente ese
+  endpoint, se mueve a otro, o las devoluciones se hacen sólo desde el panel? **Bloquea B6 y D5.**
 - **N10** ✅ **RESUELTA (2026-09-21)** — **No existe la devolución parcial: es `full_only`.** La
   mención "total o parcial" de `doc_point.md` §7 es un error de la doc. Ver §3.8 para el cambio que
   implica.
-- **N11** 🔴 — **¿Cómo se paga con tarjeta en sandbox?** La ayuda del portal dice que en Link de Pago
-  y QR **no está habilitado el ingreso manual de datos de tarjeta**: hay que escanear desde MODO o una
-  app bancaria adherida. Pero `doc_checkout.md` §11 publica tarjetas de prueba con número, vencimiento
-  y CVV. ¿Esas tarjetas se tipean en el checkout de sandbox, o el flujo de prueba también exige
-  billetera? De la respuesta dependen los casos A2-A6 y B3c.
-- **N9** 🔴 — ¿Qué `pos_id` corresponde a la terminal física **`L40000978`**? La doc inclina la
-  balanza: `doc_qr.md` §1 dice "registrar/crear QRs físicos en la plataforma **para obtener los
-  correspondientes `pos_id`**" y §3 define `seller.pos_id` como "ID único de la **terminal o punto de
-  venta física**". O sea, parece haber un `pos_id` por dispositivo — y el que tenemos cargado es el
-  de la tienda de e-commerce (§3.5). Pedir el de la terminal y el de cada QR físico.
+- **N11** ✅ **RESUELTA por la doc (2026-09-22)** — El ingreso manual de tarjetas es un **flag del
+  comercio**: *"si el ingreso manual de tarjetas se encuentra habilitado, puede completarse el pago
+  ingresando datos manuales"*. En desktop se muestra QR; en mobile se redirige a MODO. **A2-A6 son
+  ejecutables sólo si lo tenemos habilitado** — falta confirmar si es nuestro caso.
+- **N9** ✅ **RESUELTA por la doc (2026-09-22)** — Hay **un `pos_id` por punto de venta y por tipo de
+  pago**. Se descargan desde **Nave > Integraciones > Sistema de gestión**. Los QR se dan de alta en
+  **Nave > Negocios > Agregar medios de cobro > QR**. Lo confirma el error `INVALID_POS` (409):
+  *"Given POS is for a different payment type"*. **Acción: bajar ese archivo del panel** — puede
+  destrabar el `pos_id` sin esperar el correo.
 
 ### Para vos (definen el alcance)
 

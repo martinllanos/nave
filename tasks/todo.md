@@ -63,6 +63,17 @@
 - [ ] `tasks/todo.md` Fase 2 tilda "validación estricta de firma/hash" — **Nave no firma sus webhooks**: no está implementado ni es implementable con el contrato actual. La defensa real es el GET de verificación server-side.
 - [ ] Los diagramas de `docs/Modulo Nave - *.md` usan endpoints inexistentes (`/api/v1/checkouts`, `/api/integrations/payment`). El contrato real está en `tasks/doc_*.md`.
 
+### Documentación oficial actualizada (2026-09-22)
+Relevada del DevPortal de Nave. Detalle en `tasks/plan_homologacion_nave.md` y `tasks/doc_actualizada_2026-09-22.md`.
+- [x] **B11 confirmado por la fuente**: la doc publica las dos tablas de estados por separado. El fix de `81c02c7` queda validado.
+- [ ] 🔴 **B3 destrabado**: la respuesta de la intención trae `payment_attempts.payments[].payment_id`. Ya se puede traer el pago real, guardar el `payment_id` para devoluciones y poblar el ticket (marca, últimos 4, cupón, plan de cuotas).
+- [ ] 🔴 **Host equivocado para Nave Point**: sandbox de Nave Point es `https://e3-api.ranty.io`, no `api-sandbox.ranty.io`. `_nave_get_api_url()` devuelve uno solo para los cuatro flujos. El test `test_pos_nave_payment.py:67` tenía razón; el commit `ffb524b` fue en la dirección equivocada.
+- [ ] 🔴 **N12: el endpoint de devolución desapareció de la doc**. `DELETE /api/payments/{payment_id}` no aparece en ninguna de las cuatro páginas. Preguntar a Nave antes de invertir en B6.
+- [ ] 🟠 **Cancelar intención puede no aplicar a `smart_pos`**: el error de baja lista sólo `payment_link, dynamic_qr, static_qr`. Verificar el caso C4.
+- [ ] 🟠 **`buyer` es opcional**: dejar de mandar `'00000000'` / `'correo@temporal.com'` / `'S/D'` cuando el partner está incompleto.
+- [ ] 🟢 **Simulador PCT para QR**: `PUT /qrtools/transfer_payment/simulation/payment` paga *nuestra propia* intención. Permite homologar QR end-to-end sin hardware.
+- [ ] Bajar de **Nave > Integraciones > Sistema de gestión** el archivo con los IDs de puntos de venta.
+
 ### Bloqueo operativo con Nave (2026-09-21)
 - [ ] 🔴🔴 **Conseguir acceso al comercio/local de prueba.** La terminal `L40000978` se identifica como dispositivo TEST y pide vincularse a un local "test" que no existe en nuestro Espacio Nave. El QR que se pudo descargar es de **producción** (`Be onlyone Jujuy - QR 1`) y **no debe usarse para pruebas**: son cobros reales. Bloquea los bloques C y H completos. Ver `plan_homologacion_nave.md` §3.10.
 

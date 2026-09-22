@@ -1,3 +1,5 @@
+> ⚠️ **SUPERSEDIDO (2026-09-22)** — copia anterior a la documentación vigente. Ver `tasks/doc_actualizada_2026-09-22.md` y las URLs del DevPortal de Nave.
+
 # Integración de Link de Pago con Nave
 
 Permití a tus clientes pagar a través de links de pago generados dinámicamente mediante nuestra API. Los clientes podrán realizar pagos con QR o tarjetas de crédito y débito.

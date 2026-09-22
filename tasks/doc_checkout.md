@@ -1,3 +1,5 @@
+> ⚠️ **SUPERSEDIDO (2026-09-22)** — copia anterior a la documentación vigente. Ver `tasks/doc_actualizada_2026-09-22.md` y las URLs del DevPortal de Nave.
+
 # Integración de Checkout con Nave
 
 Integrá nuestra solución de cobros vía API y permití pagos con QR o tarjetas directamente desde tu sitio o app. Vas a tener una experiencia simple y segura para tus clientes.
