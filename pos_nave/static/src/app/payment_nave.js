@@ -198,7 +198,7 @@ export class PaymentNave extends PaymentInterface {
 
             if (NAVE_STATUS.SUCCESS.includes(statusName)) {
                 this._stop_polling();
-                line.transaction_id = data.id || intent_id;
+                this._apply_payment_details(line, data, intent_id);
                 line.set_payment_status("done");
                 return true;
             }
@@ -262,6 +262,67 @@ export class PaymentNave extends PaymentInterface {
             line.set_payment_status("retry");
             return false;
         }
+    }
+
+    /**
+     * Vuelca en la línea de pago los datos del cobro: el identificador que sirve para devolver,
+     * y los datos de la tarjeta que van impresos en el ticket.
+     */
+    _apply_payment_details(line, data, intent_id) {
+        // El payment_id identifica al pago y es el que espera el endpoint de devolución.
+        // El id de la intención no sirve para eso.
+        line.transaction_id = data.nave_payment_id || data.id || intent_id;
+
+        const payment = data.nave_payment;
+        if (!payment) {
+            // El cobro salió bien igual; sólo nos quedamos sin los datos de la tarjeta.
+            return;
+        }
+
+        const method = payment.payment_method || {};
+        const authData = payment.transactions?.[0]?.auth_data || {};
+
+        line.card_brand = method.card_brand || "";
+        line.card_type = method.card_type || "";
+        line.card_no = method.card_last4 || "";
+        line.cardholder_name = method.card_holder_name || "";
+        line.payment_method_issuer_bank = method.issuer || "";
+        line.payment_method_payment_mode = payment.payment_input || "";
+        line.payment_ref_no = payment.payment_code || "";
+        line.payment_method_authcode = authData.auth_id || "";
+
+        line.set_receipt_info(this._format_receipt(payment, method, authData));
+    }
+
+    /**
+     * Arma el texto que se imprime en el ticket. Nave pide que figuren los últimos cuatro
+     * dígitos y el número de cupón y lote.
+     */
+    _format_receipt(payment, method, authData) {
+        const rows = [];
+        if (method.card_brand || method.card_last4) {
+            rows.push(_t("Tarjeta: %s ****%s", method.card_brand || "", method.card_last4 || ""));
+        }
+        if (method.card_type) {
+            rows.push(_t("Tipo: %s", method.card_type));
+        }
+        if (payment.payment_code) {
+            rows.push(_t("Cupón: %s", payment.payment_code));
+        }
+        if (authData.auth_id) {
+            rows.push(_t("Autorización: %s", authData.auth_id));
+        }
+        if (authData.ticket?.batch) {
+            rows.push(_t("Lote: %s", authData.ticket.batch));
+        }
+        const plan = method.installment_plan;
+        if (plan && plan.installments > 1) {
+            rows.push(_t("Cuotas: %s", plan.installments));
+        }
+        if (method.issuer) {
+            rows.push(_t("Emisor: %s", method.issuer));
+        }
+        return rows.length ? "\n" + rows.join("\n") : "";
     }
 
     /**
