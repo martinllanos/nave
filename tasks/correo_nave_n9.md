@@ -56,6 +56,19 @@ tenemos acceso a él.
 
 5. ¿El `pos_id` **cambia entre sandbox y producción**, o es el mismo en ambos ambientes?
 
+6. **Devoluciones por API.** Veníamos usando `DELETE /api/payments/{payment_id}` para devolver un
+   pago aprobado, siguiendo una versión anterior de la documentación. En el DevPortal actual ese
+   endpoint ya no aparece en ninguna de las cuatro secciones: el único `DELETE` documentado es el de
+   intenciones (`/api/payment_requests/{id}`). Sin embargo, los estados `REFUNDED` y `CANCELLED`
+   siguen figurando entre los estados posibles de un pago. ¿Sigue vigente ese endpoint, se reemplazó
+   por otro, o las devoluciones se gestionan únicamente desde el panel de Nave?
+
+7. **Ingreso manual de tarjetas.** La documentación de Checkout indica que el pago con datos de
+   tarjeta ingresados manualmente está disponible "si el ingreso manual de tarjetas se encuentra
+   habilitado". ¿Está habilitado para nuestro comercio, en sandbox y en producción? De eso depende si
+   podemos usar las tarjetas de prueba o si toda la homologación online debe hacerse escaneando el QR
+   desde una billetera.
+
 El punto 1 es el que nos está frenando: sin ese local no podemos vincular la terminal ni avanzar con
 las pruebas presenciales. Si hace falta que enviemos alguna solicitud formal o completemos algún
 formulario, indíquennos por favor.
@@ -71,14 +84,14 @@ martinllanos@onlyone.com.ar
 
 ---
 
-## Bloque opcional — agregar sólo si quieren resolver también N2 y N11
+## Bloque opcional — ya no hace falta
 
-> Misma audiencia técnica, ahorra idas y vueltas de calendario.
-> Si prefieren que el correo se enfoque en destrabar la terminal, borrar este bloque.
+> ⚠️ **2026-09-22: BORRAR ESTE BLOQUE.** Las dos preguntas quedaron respondidas por la documentación
+> actualizada del DevPortal: el host de sandbox de Nave Point es `e3-api.ranty.io`, y el ingreso
+> manual de tarjetas es un flag del comercio (esto último pasó a ser la pregunta 7 del cuerpo).
+> Se conserva sólo como registro de lo que ya no hay que preguntar.
 
-Aprovechamos para consultar dos puntos más de la integración:
-
-6. **Host de sandbox para Nave Point.** En la documentación de Smart Point los endpoints de sandbox
+~~6. **Host de sandbox para Nave Point.** En la documentación de Smart Point los endpoints de sandbox
    figuran bajo `https://e3-api.ranty.io`, mientras que en la de Checkout y QR el host de sandbox es
    `https://api-sandbox.ranty.io`. En nuestras pruebas `e3-api.ranty.io` devolvió `404` y
    `api-sandbox.ranty.io` respondió correctamente. ¿Cuál es el host correcto de sandbox para Nave Point?
@@ -88,4 +101,4 @@ Aprovechamos para consultar dos puntos más de la integración:
    pago y QR, *no está habilitado el ingreso manual de datos de tarjeta* y que el pago debe hacerse
    escaneando desde MODO o una app bancaria adherida. ¿Cómo se usan entonces esas tarjetas de prueba
    en sandbox: se ingresan en un formulario del checkout, o el flujo de prueba también requiere
-   billetera virtual?
+   billetera virtual?~~
