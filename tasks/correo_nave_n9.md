@@ -1,4 +1,45 @@
-# Borrador de correo a Nave — acceso al ambiente de prueba y `pos_id`
+# Borradores de correo a Nave
+
+## Borrador 2 — nuevo código de vinculación para la terminal (2026-09-22)
+
+> Va como **respuesta en el hilo ya abierto**: *"Nave Point: S/N: L40000978 (DEBUG) - Pide soporte
+> técnico"*, con `integraciones@navenegocios.com`. Mantener el hilo evita volver a explicar el caso.
+
+---
+
+**Asunto:** Re: Nave Point: S/N: L40000978 (DEBUG) - Pide soporte tecnico
+
+Hola, buen día.
+
+Retomo este hilo. El 14/08 nos pasaron el `pos_id` de la terminal y un código de vinculación de
+6 dígitos, con la indicación de reiniciar el equipo e ingresarlo.
+
+Reintenté la vinculación ahora y **el código ya no es aceptado**, entiendo que por vencimiento.
+
+¿Nos pueden generar un **código de vinculación nuevo** para la terminal **S/N `L40000978`**?
+
+Aprovecho para confirmar dos datos, así lo dejamos configurado de una:
+
+1. ¿Sigue vigente el `pos_id` `b1c04ade-dec9-4ca0-9fd9-8464c9006764` para esa terminal?
+2. Ese `pos_id`, ¿es el mismo para sandbox y para producción, o hay uno por ambiente?
+
+Quedamos atentos. Muchas gracias.
+
+Saludos cordiales,
+
+**Martín Llanos**
+Be onlyone — CUIT 20-26253453-8
+martinllanos@onlyone.com.ar
+
+---
+
+## Borrador 1 — acceso al ambiente de prueba y `pos_id`
+
+> ⚠️ **Parcialmente superado (2026-09-22)**: la pregunta 2 (qué `pos_id` corresponde a la terminal)
+> ya estaba respondida en el hilo de agosto, y el punto 1 sobre el comercio de prueba se replantea:
+> Nave no pidió un local "test", pidió reiniciar la terminal con el código de vinculación. Siguen
+> vigentes las preguntas 3 a 7 (QR, ambientes, devoluciones, ingreso manual de tarjetas).
+
 
 > Destinatario: `integraciones@navenegocios.com`, con copia al ejecutivo de cuentas Galicia.
 > Sólo falta el teléfono de contacto (y confirmar el nombre de la firma).

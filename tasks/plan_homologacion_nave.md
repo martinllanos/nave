@@ -332,7 +332,7 @@ Consecuencias para el plan:
 | P14 | **Correo enviado a Nave el 2026-09-22** con N9 (acceso al comercio de prueba y `pos_id`), N12 (devoluciones por API) e ingreso manual de tarjetas | Comercial | ⏳ **esperando respuesta** |
 | P3 | Registrar la `notification_url` del lado de Nave | Comercial | ✅ **hecho**. Es **la misma URL para homologación y producción**: `https://www.onlyone.ar/payment/nave/webhook`. Lo que cambia es el estado `test`/`enabled` del provider — ver §3.7 |
 | P4 | Terminal Smart Point física de prueba | Comercial | ⚠️ **recibida (serie `L40000978`) pero NO vinculable**: pide un local "test" que no existe en nuestro portal — ver §3.10 |
-| P13 | Vincular la terminal `L40000978` | Técnico | ⏳ **hay camino**: reiniciar el equipo e ingresar el código de vinculación que Nave mandó el 2026-08-14 (§3.10) |
+| P13 | Vincular la terminal `L40000978` | Comercial | ⏳ **el código del 2026-08-14 caducó**. Pedido uno nuevo a Nave en el mismo hilo (borrador 2 en `tasks/correo_nave_n9.md`) |
 | P15 | Cargar el `pos_id` de la terminal (`b1c04ade-…`) en el método de pago POS | Técnico | ⬜ |
 | P12 | 🔴 Obtener de Nave el **`pos_id` (UUID) que corresponde a la terminal `L40000978`** y cargarlo en `nave_terminal_id`. Hoy ese campo tiene `f71ba756-1d80-4ab3-9f43-5dc247fd6c4a`, que es **el mismo UUID que el `nave_pos_id` de e-commerce** del provider — ver §3.5 | Técnico | ⬜ |
 | P5 | Confirmar con Nave el host de sandbox de Smart POS: `e3-api.ranty.io` (doc) vs `api-sandbox.ranty.io` (código) | Técnico | ⬜ |
@@ -464,6 +464,10 @@ sigue sin poder vincularse (§3.10). Esta decisión destraba los flujos **online
 
 Hallazgo del 2026-09-21, y es el que frena hoy **todo** el testing presencial.
 
+> ⏳ **Actualización 2026-09-22 (2)**: el código de vinculación del 14/08 **ya no es aceptado** por
+> la terminal. Se pidió uno nuevo en el mismo hilo. El bloque C sigue en espera, pero por un trámite
+> acotado y con el `pos_id` ya en mano, no por falta de acceso a un ambiente.
+>
 > ✅ **Actualización 2026-09-22**: aparece un camino. En el hilo del 2026-08-14, Nave no pidió un
 > local "test": mandó el `pos_id` de la terminal y un **código de vinculación**, con la instrucción
 > de *"reiniciar la terminal e ingresar el código de vinculación"*. Probar eso antes de dar el bloque
