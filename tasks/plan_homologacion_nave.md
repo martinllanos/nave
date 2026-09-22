@@ -227,8 +227,20 @@ Arreglar esto es más que "mostrar el botón": es cerrar el ciclo completo
 defecto (`payment/models/payment_provider.py:737-745`). `_activate_default_pms()` no activa nada, y
 `payment.payment_method_card` y `payment.payment_method_naranja` vienen `active=False` de base.
 
-**Resultado esperado a confirmar en E0/A1**: en el checkout del sitio, el cliente ve únicamente el
-método QR. Si Nave exige demostrar el pago con tarjeta de prueba desde el checkout, no hay botón.
+**El efecto es no determinístico y varía por base** (verificado el 2026-09-22):
+
+| Método | Base local (instalación limpia) | Base de homologación |
+|---|---|---|
+| `card` | inactivo | **activo** |
+| `naranja` | inactivo | inactivo |
+| `nave_qr` | **inactivo** | activo |
+
+O sea: el módulo **nunca activa sus propios métodos**, y que aparezcan o no depende de factores
+ajenos (otro proveedor que activó `card`, una activación manual). En una instalación limpia no
+aparece **ninguno**, ni siquiera el QR propio. Corregir mi lectura anterior: no es "sólo se ve el
+QR", es "no se ve nada salvo que algo más los haya activado".
+
+**Confirmar en A1** qué ve realmente el cliente en el checkout de homologación.
 
 Relacionado: `_get_supported_currencies()` (`payment_provider.py:49-54`) hace `search([('name','=','ARS')])`
 **sin `active_test=False`**; si la moneda ARS está archivada devuelve vacío y Odoo lo interpreta como
@@ -317,6 +329,7 @@ Consecuencias para el plan:
 |---|---|---|---|
 | P1 | ~~Base de homologación separada~~ — **no aplica**: `do-onlyone` ya es el entorno de homologación | — | ✅ |
 | P2 | Obtener de Nave el **checklist oficial de homologación** | Comercial | ⬜ |
+| P14 | **Correo enviado a Nave el 2026-09-22** con N9 (acceso al comercio de prueba y `pos_id`), N12 (devoluciones por API) e ingreso manual de tarjetas | Comercial | ⏳ **esperando respuesta** |
 | P3 | Registrar la `notification_url` del lado de Nave | Comercial | ✅ **hecho**. Es **la misma URL para homologación y producción**: `https://www.onlyone.ar/payment/nave/webhook`. Lo que cambia es el estado `test`/`enabled` del provider — ver §3.7 |
 | P4 | Terminal Smart Point física de prueba | Comercial | ⚠️ **recibida (serie `L40000978`) pero NO vinculable**: pide un local "test" que no existe en nuestro portal — ver §3.10 |
 | P13 | 🔴🔴 Obtener acceso al **comercio/local de prueba** de Nave, con su terminal y sus QR de sandbox | Comercial | ⬜ **bloquea todo el testing presencial** |

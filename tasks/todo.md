@@ -45,13 +45,13 @@
   - Aplicado también **B4**: watchdog de 5 min atado al `duration_time`, tolerancia de 3 fallos de transporte seguidos antes de cortar, y distinción entre `silentCall` devolviendo `false` (error de servidor) y una respuesta válida de Nave.
   - Aplicado `close()`: al salir de la pantalla de pago se corta el temporizador, que antes quedaba vivo consultando a Nave.
   - **Sigue abierto B3**: `line.transaction_id` guarda el id de la intención. Para traer el `payment_id` real hace falta conocer la forma de la respuesta de la intención — se agregó un `_logger.debug` del payload crudo para averiguarla en la primera corrida (S3).
-- [ ] **B1** El wizard de link de pago no crea `payment.transaction` → el webhook no concilia nunca.
+- [x] **B1** *(b334209)* El wizard de link de pago no crea `payment.transaction` → el webhook no concilia nunca. Resuelto: la transacción se crea antes de llamar a Nave y su referencia es el `external_payment_id`. Probado end-to-end (`test_11_link_wizard_webhook_reconciles`).
 - [ ] **B2** Reembolso POS manda `"REFUND-CIEGO"` hardcodeado: falla siempre.
 - [x] **B3** *(657b23d)* El POS guarda el id de la *intención* en `transaction_id`, no el `payment_id` del pago. Resuelto: sale de `payment_attempts.payments[]`.
 - [x] **B4** *(resuelto junto con B11)* Polling del POS sin timeout ni manejo de `EXPIRED`/`DISABLED` → loop infinito; única salida "Force done".
 - [ ] **B5** SSRF: `payment_check_url` del webhook se usa sin validar el host → se puede forzar un pago aprobado.
 - [ ] **B6** 🔴 El ciclo de devolución no cierra en **ningún** flujo (confirmado en alcance, D5): botón invisible en backend, `amount_to_refund` ignorado, `_set_canceled` sobre el registro equivocado, y el webhook `REFUNDED`/`CANCELLED` no modifica una tx en `done`. Además `nave_qr` declara `support_refund='partial'` y **Nave confirmó que es `full_only` (N10)**: corregir `data/payment_method_data.xml:33` + script de migración (el archivo es `noupdate="1"`) y declarar `full_only` en `_compute_feature_support_fields`.
-- [ ] **B7** En el checkout sólo se ve el método QR (falta `_get_default_payment_method_codes`).
+- [ ] **B7** El módulo nunca activa sus métodos de pago (falta `_get_default_payment_method_codes`). Verificado 2026-09-22: en instalación limpia **`card`, `naranja` y `nave_qr` quedan los tres inactivos**; en la base de homologación `card` y `nave_qr` están activos por causas ajenas al módulo. El resultado depende de la base, no del código.
 - [ ] **B8** QR interoperable presencial: **no implementado y CONFIRMADO EN ALCANCE (D4, 2026-09-21)**. Es desarrollo nuevo: endpoint `/api/payment_request/static_qr`, campo `qr_amount: "close"`, `pos_id` propio por QR físico. Homologable sin hardware vía el endpoint de simulación de sandbox (`doc_qr.md` §10).
 - [ ] **B9** Sin `ir.cron` de respaldo si se pierde el webhook.
 - [x] **B10** *(22ce2f7)* Suite de `pos_nave` desalineada con el código. Reescrita y ampliada: **20 tests en verde** entre `pos_nave` y `payment_nave`.
