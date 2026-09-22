@@ -2,6 +2,7 @@
 
 import logging
 import requests
+from datetime import timedelta
 from urllib.parse import urlparse, urlunparse
 from werkzeug import urls
 
@@ -237,6 +238,89 @@ class PaymentTransaction(models.Model):
             raise ValidationError(f"Nave: no se encontró transacción para la referencia {reference}.")
 
         return tx
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Conciliación de respaldo (webhooks perdidos)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    @api.model
+    def _cron_nave_poll_pending_transactions(self):
+        """ Reconsulta contra Nave las transacciones que quedaron esperando el webhook.
+
+        Nave reintenta la notificación cinco veces a lo largo de unas 7h45m y después se rinde. Sin
+        esta red, un webhook perdido deja la transacción pendiente para siempre.
+
+        Se ignoran las más recientes para no adelantarse al webhook, y las demasiado viejas para no
+        arrastrar indefinidamente intenciones que nunca se pagaron. Ambos límites se pueden ajustar
+        con los parámetros `payment_nave.poll_min_age_minutes` y `payment_nave.poll_max_age_days`.
+        """
+        params = self.env['ir.config_parameter'].sudo()
+        min_age = int(params.get_param('payment_nave.poll_min_age_minutes', 30))
+        max_age = int(params.get_param('payment_nave.poll_max_age_days', 2))
+        now = fields.Datetime.now()
+
+        transactions = self.search([
+            ('provider_code', '=', 'nave'),
+            ('state', 'in', ('draft', 'pending')),
+            ('nave_payment_request_id', '!=', False),
+            ('create_date', '<=', now - timedelta(minutes=min_age)),
+            ('create_date', '>=', now - timedelta(days=max_age)),
+        ])
+        if not transactions:
+            return
+
+        _logger.info("[payment_nave] Reconsultando %s transacciones pendientes.", len(transactions))
+        for tx in transactions:
+            # Un savepoint por transacción: que una falla no se lleve puesto el resto del lote.
+            try:
+                with self.env.cr.savepoint():
+                    tx._nave_poll_payment_request()
+            except Exception:
+                _logger.exception(
+                    "[payment_nave] Error reconsultando la transacción %s.", tx.reference
+                )
+
+    def _nave_poll_payment_request(self):
+        """ Consulta la intención y, si ya se resolvió, lleva la transacción a su estado final. """
+        self.ensure_one()
+
+        token = self.provider_id._nave_get_access_token()
+        base_url = self.provider_id._nave_get_api_url()
+        api_url = f"{base_url}/api/payment_requests/{self.nave_payment_request_id}"
+        headers = {
+            'Authorization': f"Bearer {token}",
+            'Accept': 'application/json',
+        }
+
+        response = requests.get(api_url, headers=headers, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        status_name = (data.get('status') or {}).get('name')
+
+        if status_name in ('SUCCESS_PROCESSED', 'FAILURE_PROCESSED'):
+            payment_id = self._nave_extract_payment_id(data)
+            if not payment_id:
+                _logger.warning(
+                    "[payment_nave] La intención %s está en %s pero no expone un payment_id.",
+                    self.nave_payment_request_id, status_name,
+                )
+                return
+            # Se reusa el mismo camino que el webhook, incluida la verificación del pago.
+            self._process_notification_data({
+                'payment_id': payment_id,
+                'external_payment_id': self.reference,
+            })
+        elif status_name in ('EXPIRED', 'DISABLED', 'BLOCKED'):
+            self._set_canceled(_("Nave informó la intención de pago como %s.", status_name))
+
+    def _nave_extract_payment_id(self, intent_data):
+        """ Devuelve el `payment_id` del último intento de pago de una intención, o False. """
+        attempts = (intent_data or {}).get('payment_attempts') or {}
+        payments = attempts.get('payments') or []
+        if not payments:
+            return False
+        return payments[-1].get('payment_id') or False
 
     def _nave_get_check_url(self, payment_id, notification_data):
         """ URL contra la que se verifica el estado real del pago.

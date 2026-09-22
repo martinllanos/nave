@@ -3,9 +3,12 @@
 # Cubre: autenticación (caché de token), creación de intención de pago,
 # procesamiento de webhooks, reembolsos y el wizard de link de pago.
 
+from datetime import timedelta
 from unittest.mock import patch, MagicMock
 
-from odoo import Command
+import requests
+
+from odoo import Command, fields
 from odoo.tests import tagged
 from odoo.addons.payment.tests.common import PaymentCommon
 
@@ -583,3 +586,116 @@ class TestNaveProvider(PaymentCommon):
             self.nave_qr_method.active,
             "Al habilitar el proveedor, su método de pago debe quedar activo",
         )
+
+    # ──────────────────────────────────────────────
+    # 8. CONCILIACIÓN DE RESPALDO (CRON)
+    # ──────────────────────────────────────────────
+
+    def _nave_make_stale_tx(self, reference, request_id, minutes_old=90):
+        """Transacción pendiente y lo bastante vieja como para que el cron la tome."""
+        tx = self._nave_make_tx(reference)
+        tx.write({'nave_payment_request_id': request_id})
+        tx._set_pending()
+        old = fields.Datetime.now() - timedelta(minutes=minutes_old)
+        self.env.cr.execute(
+            "UPDATE payment_transaction SET create_date = %s WHERE id = %s", (old, tx.id)
+        )
+        tx.invalidate_recordset(['create_date'])
+        return tx
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_19_cron_reconciles_lost_webhook(self, mock_get):
+        """Si el webhook nunca llegó, el cron recupera el pago y concilia.
+
+        Nave reintenta cinco veces durante unas 7h45m y después se rinde; sin esta red la
+        transacción queda pendiente para siempre.
+        """
+        self._nave_arm_token()
+        tx = self._nave_make_stale_tx('TEST-NAVE-CRON-001', 'pr-cron-001')
+
+        mock_get.side_effect = [
+            # 1) la intención, ya cobrada, con el payment_id adentro
+            MagicMock(
+                json=MagicMock(return_value={
+                    'id': 'pr-cron-001',
+                    'status': {'name': 'SUCCESS_PROCESSED'},
+                    'payment_attempts': {'payments': [{'payment_id': 'pay-cron-001'}]},
+                }),
+                raise_for_status=MagicMock(return_value=None),
+            ),
+            # 2) la verificación del pago, el mismo camino que usa el webhook
+            MagicMock(
+                json=MagicMock(return_value={
+                    'id': 'pay-cron-001',
+                    'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
+                    'wallet': {'name': 'modo'},
+                }),
+                raise_for_status=MagicMock(return_value=None),
+            ),
+        ]
+
+        self.env['payment.transaction']._cron_nave_poll_pending_transactions()
+
+        self.assertEqual(tx.state, 'done')
+        self.assertEqual(tx.nave_payment_id, 'pay-cron-001')
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_20_cron_cancels_expired_intent(self, mock_get):
+        """Una intención vencida deja de estar pendiente en vez de quedar colgada."""
+        self._nave_arm_token()
+        tx = self._nave_make_stale_tx('TEST-NAVE-CRON-002', 'pr-cron-002')
+
+        mock_get.return_value = MagicMock(
+            json=MagicMock(return_value={'id': 'pr-cron-002', 'status': {'name': 'EXPIRED'}}),
+            raise_for_status=MagicMock(return_value=None),
+        )
+
+        self.env['payment.transaction']._cron_nave_poll_pending_transactions()
+
+        self.assertEqual(tx.state, 'cancel')
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_21_cron_skips_recent_transactions(self, mock_get):
+        """No se adelanta al webhook: las transacciones recientes se dejan en paz."""
+        self._nave_arm_token()
+        self._nave_make_stale_tx('TEST-NAVE-CRON-003', 'pr-cron-003', minutes_old=5)
+
+        self.env['payment.transaction']._cron_nave_poll_pending_transactions()
+
+        mock_get.assert_not_called()
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_22_cron_survives_a_failing_transaction(self, mock_get):
+        """Una transacción que falla no se lleva puesto el resto del lote."""
+        self._nave_arm_token()
+        failing = self._nave_make_stale_tx('TEST-NAVE-CRON-004', 'pr-cron-004')
+        healthy = self._nave_make_stale_tx('TEST-NAVE-CRON-005', 'pr-cron-005')
+
+        # El cron no garantiza el orden en que toma las transacciones, así que se responde
+        # según la URL consultada y no por posición.
+        def _dispatch(url, **kwargs):
+            if 'pr-cron-004' in url:
+                raise requests.exceptions.RequestException("boom")
+            if 'pr-cron-005' in url:
+                return MagicMock(
+                    json=MagicMock(return_value={
+                        'id': 'pr-cron-005',
+                        'status': {'name': 'SUCCESS_PROCESSED'},
+                        'payment_attempts': {'payments': [{'payment_id': 'pay-cron-005'}]},
+                    }),
+                    raise_for_status=MagicMock(return_value=None),
+                )
+            return MagicMock(
+                json=MagicMock(return_value={
+                    'id': 'pay-cron-005',
+                    'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
+                }),
+                raise_for_status=MagicMock(return_value=None),
+            )
+
+        mock_get.side_effect = _dispatch
+
+        self.env['payment.transaction']._cron_nave_poll_pending_transactions()
+
+        self.assertEqual(failing.state, 'pending', "La que falló queda como estaba")
+        self.assertEqual(healthy.state, 'done', "La sana se concilia igual")
