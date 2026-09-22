@@ -559,3 +559,27 @@ class TestNaveProvider(PaymentCommon):
             mock_get.call_args[0][0],
             'https://api-sandbox.ranty.io/payments/pay-u',
         )
+
+    # ──────────────────────────────────────────────
+    # 7. ACTIVACIÓN DE MÉTODOS DE PAGO
+    # ──────────────────────────────────────────────
+
+    def test_18_provider_activates_its_payment_methods(self):
+        """Habilitar el proveedor activa sus métodos de pago.
+
+        Odoo archiva los métodos y sólo activa los que devuelve _get_default_payment_method_codes.
+        Sin implementarlo, el proveedor quedaba habilitado y el checkout no ofrecía ninguno.
+        """
+        self.assertEqual(
+            self.nave_provider._get_default_payment_method_codes(),
+            {'card', 'naranja', 'nave_qr'},
+        )
+
+        self.nave_qr_method.active = False
+        self.nave_provider.state = 'disabled'
+        self.nave_provider.state = 'test'
+
+        self.assertTrue(
+            self.nave_qr_method.active,
+            "Al habilitar el proveedor, su método de pago debe quedar activo",
+        )

@@ -22,6 +22,10 @@ NAVE_PRODUCTION_API_URL = 'https://api.ranty.io'
 # cualquiera que adivine una referencia puede apuntar la verificación a un host propio.
 NAVE_TRUSTED_DOMAIN = 'ranty.io'
 
+# Métodos de pago que el proveedor activa al pasar a Prueba o Producción. Sin esto Odoo no activa
+# ninguno y los métodos de Nave quedan archivados, o sea invisibles en el checkout.
+NAVE_DEFAULT_PAYMENT_METHOD_CODES = {'card', 'naranja', 'nave_qr'}
+
 
 class PaymentProvider(models.Model):
     _inherit = 'payment.provider'
@@ -140,6 +144,18 @@ class PaymentProvider(models.Model):
         })
 
         return access_token
+
+    def _get_default_payment_method_codes(self):
+        """ Métodos que se activan solos al habilitar el proveedor.
+
+        Odoo los archiva por defecto y sólo activa los que devuelve este método
+        (`_activate_default_pms`). Sin sobreescribirlo, el proveedor quedaba habilitado pero sin
+        un solo método visible en el checkout.
+        """
+        default_codes = super()._get_default_payment_method_codes()
+        if self.code != 'nave':
+            return default_codes
+        return NAVE_DEFAULT_PAYMENT_METHOD_CODES
 
     def _nave_get_auth_url(self):
         """ Retorna el endpoint de autenticación según el estado del proveedor (Prueba o Producción). """
