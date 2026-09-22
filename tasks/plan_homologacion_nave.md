@@ -380,6 +380,51 @@ Nota colateral: esta duplicación es también la razón por la que `test_05_miss
 (`pos_nave/tests/test_pos_nave_payment.py:140-150`) no levanta el `UserError` que espera — el
 fallback a `nave_pos_id` lo enmascara.
 
+### 3.11 Modo acordado: producción acotada (2026-09-22)
+
+**Decisión**: se homologa sobre `www.onlyone.ar` con **cobros reales de importe acotado**, en lugar
+de esperar el comercio de prueba de Nave (§3.10).
+
+| Límite | Valor |
+|---|---|
+| Por transacción | **ARS 1.200** |
+| Total acumulado | **ARS 90.000** |
+
+**Lo que esto implica, y no es menor:**
+
+1. **El proveedor tiene que pasar a `enabled`.** Con `state = 'test'` las URLs apuntan a sandbox y
+   una tarjeta real no puede procesarse. No hay forma de cobrar de verdad quedándose en Prueba.
+2. **Los cobros son reales**: acreditan en la cuenta CA $ 4008221-1 158-9 de Banco Galicia, generan
+   asientos reales y las devoluciones devuelven plata de verdad.
+3. **Hay que usar los `pos_id` de producción** de cada dispositivo (§3.9.k).
+4. **Las credenciales son las de producción.** Son un set distinto del de sandbox y ocupan los
+   mismos dos campos del proveedor.
+
+**Checklist de cambio de ambiente** — en este orden:
+
+- [ ] Cargar las credenciales de **producción** (`nave_client_id`, `nave_client_secret`).
+- [ ] Cargar el `nave_pos_id` del punto de venta **ECOMMERCE** (`www.onlyone.ar`).
+- [ ] Pasar el proveedor a **Habilitado**.
+- [ ] Verificar que `nave_access_token` quedó vacío. *(Desde 18.0.1.7.1 se limpia solo al cambiar
+      estado o credenciales; antes había que hacerlo a mano o el módulo mandaba el token de sandbox
+      a producción durante 24 h.)*
+- [ ] Primera transacción por el importe mínimo posible, verificada de punta a punta.
+- [ ] Revisar que no queden transacciones de sandbox en `pending`: el cron de conciliación las
+      reconsultaría contra **producción**, donde su `payment_id` no existe.
+
+**Consecuencias sobre la matriz de casos:**
+
+| Caso | Efecto |
+|---|---|
+| A2-A4 (aprobados) | ✅ Ejecutables con tarjeta real, importes ≤ 1.200 |
+| **A5, A6 (rechazos)** | ⚠️ **Ya no se pueden provocar a voluntad**: las tarjetas de prueba no sirven en producción y un rechazo real por fondos no es reproducible. Alternativa: tarjeta vencida o CVV inválido, o pedirle a Nave un medio de rechazo en producción |
+| C9 ("Force done") | 🔴 Pasa de riesgo operativo a **riesgo financiero**: cerrar una venta como cobrada sin cobro real, con plata de por medio |
+| A14/A15, C13, H9 (devoluciones) | ⚠️ Devuelven dinero real. Y siguen bloqueadas por N12 |
+| Todos | Importes de prueba a fijar **por debajo de 1.200**; llevar la cuenta del acumulado |
+
+**No cambia** el bloqueo de la terminal: el equipo `L40000978` se identifica como dispositivo TEST y
+sigue sin poder vincularse (§3.10). Esta decisión destraba los flujos **online**, no los presenciales.
+
 ### 3.10 🔴🔴 BLOQUEANTE: no tenemos acceso al ambiente de prueba del comercio
 
 Hallazgo del 2026-09-21, y es el que frena hoy **todo** el testing presencial.
@@ -470,6 +515,17 @@ razonable es 7 días = 168 h, que es justo lo que el help del campo ya recomiend
 reusando el mismo `external_payment_id` truncado puede ser rechazado.
 
 **i) Estados del link en el panel**: `Aprobado` y `Devuelto`. Vocabulario a contrastar con el de la API.
+
+**l) Dónde NO está el `pos_id`.** La ficha de un punto de venta de e-commerce
+(`/business/virtual-branch/385213`) muestra datos de la tienda, cuenta de acreditación y medios
+aceptados, **pero no el `pos_id`**. Hay que buscarlo en el menú `⋮` de la ficha (que expone
+"Números de identificación del local") o, según indica la documentación, en el archivo de
+*Integraciones > Sistema de gestión*.
+
+La ficha de un local presencial (`/business/qr-wrapper-commerce/payment-methods`) sí separa los
+dispositivos en pestañas **Código QR** y **Nave Point**. Bajo Código QR figuran **QR 1** y **QR 2**,
+con acciones "Crear nuevo QR" y "Asociar QR pre impreso". El `pos_id` de cada QR debería salir del
+menú `⋮` de cada uno.
 
 **k) ✅ Los puntos de venta están en *Negocios > Puntos de venta*, uno por tipo de pago.**
 
