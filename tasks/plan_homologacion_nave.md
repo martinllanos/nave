@@ -332,7 +332,8 @@ Consecuencias para el plan:
 | P14 | **Correo enviado a Nave el 2026-09-22** con N9 (acceso al comercio de prueba y `pos_id`), N12 (devoluciones por API) e ingreso manual de tarjetas | Comercial | ⏳ **esperando respuesta** |
 | P3 | Registrar la `notification_url` del lado de Nave | Comercial | ✅ **hecho**. Es **la misma URL para homologación y producción**: `https://www.onlyone.ar/payment/nave/webhook`. Lo que cambia es el estado `test`/`enabled` del provider — ver §3.7 |
 | P4 | Terminal Smart Point física de prueba | Comercial | ⚠️ **recibida (serie `L40000978`) pero NO vinculable**: pide un local "test" que no existe en nuestro portal — ver §3.10 |
-| P13 | 🔴🔴 Obtener acceso al **comercio/local de prueba** de Nave, con su terminal y sus QR de sandbox | Comercial | ⬜ **bloquea todo el testing presencial** |
+| P13 | Vincular la terminal `L40000978` | Técnico | ⏳ **hay camino**: reiniciar el equipo e ingresar el código de vinculación que Nave mandó el 2026-08-14 (§3.10) |
+| P15 | Cargar el `pos_id` de la terminal (`b1c04ade-…`) en el método de pago POS | Técnico | ⬜ |
 | P12 | 🔴 Obtener de Nave el **`pos_id` (UUID) que corresponde a la terminal `L40000978`** y cargarlo en `nave_terminal_id`. Hoy ese campo tiene `f71ba756-1d80-4ab3-9f43-5dc247fd6c4a`, que es **el mismo UUID que el `nave_pos_id` de e-commerce** del provider — ver §3.5 | Técnico | ⬜ |
 | P5 | Confirmar con Nave el host de sandbox de Smart POS: `e3-api.ranty.io` (doc) vs `api-sandbox.ranty.io` (código) | Técnico | ⬜ |
 | P6 | Confirmar path de auth para QR: `m2ms` vs `m2msPrivate` | Técnico | ⬜ |
@@ -353,7 +354,41 @@ Consecuencias para el plan:
 `audience` siempre `https://naranja.com/ranty/merchants/api`. Moneda: ARS únicamente.
 `external_payment_id` ≤ 36 caracteres.
 
-### 3.5 ⚠️ El `pos_id` de la terminal está duplicado del de e-commerce
+### 3.5 ✅ RESUELTO: el `pos_id` de la terminal es otro (y ya lo teníamos)
+
+**Nave lo respondió el 2026-08-14**, en el hilo *"Nave Point: S/N: L40000978 (DEBUG) - Pide soporte
+técnico"* con `integraciones@navenegocios.com`:
+
+```
+Terminal: L40000978
+pos_id: b1c04ade-dec9-4ca0-9fd9-8464c9006764
+2FA: <código de vinculación>   (no se transcribe: es de un solo uso)
+Nota: Reiniciar la terminal e ingresar el código de vinculación
+```
+
+| | `pos_id` |
+|---|---|
+| Terminal Nave Point `L40000978` | `b1c04ade-dec9-4ca0-9fd9-8464c9006764` |
+| Tienda e-commerce (cargado hoy en `nave_pos_id` **y** en `nave_terminal_id`) | `f71ba756-1d80-4ab3-9f43-5dc247fd6c4a` |
+
+**Son distintos, y el que está cargado en el POS es el de e-commerce.** Queda confirmado todo lo que
+veníamos sospechando:
+
+- Hay un `pos_id` por dispositivo y por tipo de pago (§3.9.k y el error `INVALID_POS`).
+- El POS venía mandando el identificador de la tienda online en `seller.pos_id` para `smart_pos`.
+- **Esa es, casi con certeza, la causa del "404" que motivó el commit `ffb524b`**, que cambió el host
+  de `e3-api` a `api-sandbox` para esquivarlo. El host estaba bien; lo que estaba mal era el `pos_id`.
+
+**Acción**: cargar `b1c04ade-dec9-4ca0-9fd9-8464c9006764` en el `nave_terminal_id` del método de
+pago POS "Tarjeta" (id 3), y dejar `f71ba756-…` sólo en el `nave_pos_id` del proveedor.
+
+**Y destraba la vinculación de la terminal**: Nave no pidió un local "test", sino reiniciar el equipo
+e ingresar el código de vinculación que mandó. Ver §3.10.
+
+<details>
+<summary>Diagnóstico original (previo a encontrar la respuesta de Nave)</summary>
+
+### El `pos_id` de la terminal estaba duplicado del de e-commerce
 
 Estado actual en la base de homologación:
 
@@ -429,7 +464,13 @@ sigue sin poder vincularse (§3.10). Esta decisión destraba los flujos **online
 
 Hallazgo del 2026-09-21, y es el que frena hoy **todo** el testing presencial.
 
-**Los hechos:**
+> ✅ **Actualización 2026-09-22**: aparece un camino. En el hilo del 2026-08-14, Nave no pidió un
+> local "test": mandó el `pos_id` de la terminal y un **código de vinculación**, con la instrucción
+> de *"reiniciar la terminal e ingresar el código de vinculación"*. Probar eso antes de dar el bloque
+> presencial por bloqueado. Ojo: el código tiene más de un mes y puede haber caducado; si no entra,
+> pedir uno nuevo en el mismo hilo.
+
+**Los hechos (relevados el 2026-09-21):**
 
 1. La terminal Nave Point recibida (serie `L40000978`) **se identifica a sí misma como dispositivo
    TEST** e indica que hay que vincularla a un local llamado **"test"** en *Negocios > Locales*.
@@ -654,6 +695,8 @@ sin hardware. Campos:
 | ❌ | El polling del POS: Odoo consulta *su* intención, no la del simulador |
 
 O sea: valida la mitad entrante del contrato, que es justamente la que hoy tenemos mal mapeada.
+
+</details>
 
 ### 3.4 Tarjetas de prueba (`tasks/doc_checkout.md` §11)
 
@@ -992,11 +1035,10 @@ Estructura sugerida: `evidencias/<ID_caso>/` con `pantalla.mp4|png`, `odoo.log`,
   comercio**: *"si el ingreso manual de tarjetas se encuentra habilitado, puede completarse el pago
   ingresando datos manuales"*. En desktop se muestra QR; en mobile se redirige a MODO. **A2-A6 son
   ejecutables sólo si lo tenemos habilitado** — falta confirmar si es nuestro caso.
-- **N9** ✅ **RESUELTA por la doc (2026-09-22)** — Hay **un `pos_id` por punto de venta y por tipo de
-  pago**. Se descargan desde **Nave > Integraciones > Sistema de gestión**. Los QR se dan de alta en
-  **Nave > Negocios > Agregar medios de cobro > QR**. Lo confirma el error `INVALID_POS` (409):
-  *"Given POS is for a different payment type"*. **Acción: bajar ese archivo del panel** — puede
-  destrabar el `pos_id` sin esperar el correo.
+- **N9** ✅ **RESUELTA** — Hay un `pos_id` por dispositivo y por tipo de pago, confirmado por el
+  error `INVALID_POS` y por la propia pantalla de puntos de venta. **Nave ya nos había dado el de la
+  terminal `L40000978` el 2026-08-14**: `b1c04ade-dec9-4ca0-9fd9-8464c9006764`, distinto del de
+  e-commerce que teníamos cargado. Ver §3.5.
 
 ### Para vos (definen el alcance)
 
