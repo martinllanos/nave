@@ -12,11 +12,17 @@ class PosPaymentMethod(models.Model):
     _inherit = 'pos.payment.method'
 
     def _get_payment_terminal_selection(self):
-        return super()._get_payment_terminal_selection() + [('nave', 'Nave')]
+        return super()._get_payment_terminal_selection() + [
+            ('nave', 'Nave Point'),
+            ('nave_qr', 'Nave QR'),
+        ]
 
     nave_terminal_id = fields.Char(
-        string='ID de Terminal Nave',
-        help='El identificador único de la terminal física de Nave (Device ID / Terminal ID).',
+        string='ID del punto de venta en Nave',
+        help='El pos_id que Nave asigna al dispositivo: la terminal Nave Point o el QR físico. '
+             'Se descarga desde Nave > Integraciones > Sistema de gestión. '
+             'Cada dispositivo tiene el suyo y está atado a un tipo de pago: usar el de otro tipo '
+             'hace que la API responda INVALID_POS.',
         copy=False
     )
 
@@ -26,6 +32,14 @@ class PosPaymentMethod(models.Model):
         params = super()._load_pos_data_fields(config_id)
         params += ['nave_terminal_id']
         return params
+
+    def _nave_payment_type(self):
+        """ Tipo de pago de Nave según la terminal configurada.
+
+        Cada tipo tiene su endpoint, su host de sandbox y su propio pos_id.
+        """
+        self.ensure_one()
+        return 'static_qr' if self.use_payment_terminal == 'nave_qr' else 'smart_pos'
 
     def _get_nave_payment_provider(self):
         """Helper para obtener el proveedor de Nave activo de la compañía actual."""
@@ -54,10 +68,11 @@ class PosPaymentMethod(models.Model):
         payment_method = self.browse(payment_method_id)
 
         provider = payment_method._get_nave_payment_provider()
+        payment_type = payment_method._nave_payment_type()
         token = provider._nave_get_access_token()
-        base_url = provider._nave_get_api_url('smart_pos')
+        base_url = provider._nave_get_api_url(payment_type)
 
-        api_url = f"{base_url}/api/payment_request/smart_pos"
+        api_url = f"{base_url}/api/payment_request/{payment_type}"
         formatted_amount = f"{amount:.2f}"
 
         # El ID de la terminal (device_id) se envía en seller.pos_id, usando la terminal del método o el POS ID global
@@ -93,6 +108,10 @@ class PosPaymentMethod(models.Model):
             'duration_time': 300
         }
 
+        if payment_type == 'static_qr':
+            # Obligatorio para QR: indica que el monto viene cerrado y el cliente no lo edita.
+            payload['transactions'][0]['qr_amount'] = 'close'
+
         headers = {
             'Authorization': f"Bearer {token}",
             'Content-Type': 'application/json',
@@ -126,8 +145,9 @@ class PosPaymentMethod(models.Model):
 
         payment_method = self.browse(payment_method_id)
         provider = payment_method._get_nave_payment_provider()
+        payment_type = payment_method._nave_payment_type()
         token = provider._nave_get_access_token()
-        base_url = provider._nave_get_api_url('smart_pos')
+        base_url = provider._nave_get_api_url(payment_type)
 
         api_url = f"{base_url}/api/payment_requests/{intent_id}"
 
@@ -148,7 +168,7 @@ class PosPaymentMethod(models.Model):
             payment_id = self._nave_extract_payment_id(data)
             if payment_id:
                 data['nave_payment_id'] = payment_id
-                payment = self._nave_fetch_payment(provider, payment_id)
+                payment = self._nave_fetch_payment(provider, payment_id, payment_type)
                 if payment:
                     data['nave_payment'] = payment
             return data
@@ -198,10 +218,10 @@ class PosPaymentMethod(models.Model):
             return False
         return payments[-1].get('payment_id') or False
 
-    def _nave_fetch_payment(self, provider, payment_id):
+    def _nave_fetch_payment(self, provider, payment_id, payment_type):
         """ GET /ranty-payments/payments/{payment_id}. Devuelve el pago o False si no se pudo. """
         token = provider._nave_get_access_token()
-        base_url = provider._nave_get_api_url('smart_pos')
+        base_url = provider._nave_get_api_url(payment_type)
         api_url = f"{base_url}/ranty-payments/payments/{payment_id}"
         headers = {
             'Authorization': f"Bearer {token}",
@@ -231,8 +251,9 @@ class PosPaymentMethod(models.Model):
 
         payment_method = self.browse(payment_method_id)
         provider = payment_method._get_nave_payment_provider()
+        payment_type = payment_method._nave_payment_type()
         token = provider._nave_get_access_token()
-        base_url = provider._nave_get_api_url('smart_pos')
+        base_url = provider._nave_get_api_url(payment_type)
 
         api_url = f"{base_url}/api/payment_requests/{intent_id}"
 
@@ -271,8 +292,9 @@ class PosPaymentMethod(models.Model):
 
         payment_method = self.browse(payment_method_id)
         provider = payment_method._get_nave_payment_provider()
+        payment_type = payment_method._nave_payment_type()
         token = provider._nave_get_access_token()
-        base_url = provider._nave_get_api_url('smart_pos')
+        base_url = provider._nave_get_api_url(payment_type)
 
         api_url = f"{base_url}/api/payments/{transaction_id}"
 

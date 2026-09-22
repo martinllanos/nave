@@ -6,10 +6,10 @@
         <field name="inherit_id" ref="point_of_sale.pos_payment_method_view_form"/>
         <field name="arch" type="xml">
             <xpath expr="//field[@name='use_payment_terminal']" position="after">
-                <!-- Se muestra el ID de terminal solo si el método de pago es Nave -->
+                <!-- El pos_id sólo aplica a los cobros presenciales de Nave (terminal o QR) -->
                 <field name="nave_terminal_id"
-                       invisible="use_payment_terminal != 'nave'"
-                       required="use_payment_terminal == 'nave'"/>
+                       invisible="use_payment_terminal not in ('nave', 'nave_qr')"
+                       required="use_payment_terminal in ('nave', 'nave_qr')"/>
             </xpath>
         </field>
     </record>

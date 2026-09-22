@@ -300,6 +300,10 @@ export class PaymentNave extends PaymentInterface {
      */
     _format_receipt(payment, method, authData) {
         const rows = [];
+        const wallet = payment.wallet?.name || method.wallet_name;
+        if (wallet) {
+            rows.push(_t("Billetera: %s", wallet));
+        }
         if (method.card_brand || method.card_last4) {
             rows.push(_t("Tarjeta: %s ****%s", method.card_brand || "", method.card_last4 || ""));
         }
@@ -403,4 +407,8 @@ export class PaymentNave extends PaymentInterface {
     }
 }
 
+// Nave Point y QR interoperable comparten toda la mecánica del cliente: intención, polling,
+// cancelación y estados. Lo único que cambia es el endpoint y el host, y eso lo resuelve el
+// backend a partir del método de pago, así que se registra la misma clase para los dos.
 register_payment_method("nave", PaymentNave);
+register_payment_method("nave_qr", PaymentNave);

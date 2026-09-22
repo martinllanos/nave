@@ -49,6 +49,18 @@ def _mock_response(payload):
     )
 
 
+PAYMENT_QR_APPROVED = {
+    'id': 'pay-qr-1',
+    'payment_code': 'A07135516',
+    'payment_input': 'wallet',
+    'payment_type': 'static_qr',
+    'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
+    'payment_method': {'type': 'transfer_payment', 'wallet_name': 'mercado pago'},
+    'wallet': {'name': 'mercado pago'},
+    'transactions': [{'auth_data': {'auth_id': 'O7L8GYKNXZ8YRZQ2MPRZ50'}}],
+}
+
+
 @tagged('post_install', '-at_install', 'pos_nave')
 class TestPosNavePayment(TransactionCase):
 
@@ -254,3 +266,70 @@ class TestPosNavePayment(TransactionCase):
         """
         with self.assertRaises(ValidationError):
             self.provider.nave_pos_id = False
+
+    # ──────────────────────────────────────────────
+    # 6. QR INTEROPERABLE
+    # ──────────────────────────────────────────────
+
+    def _make_qr_method(self):
+        return self.env['pos.payment.method'].create({
+            'name': 'QR Nave',
+            'use_payment_terminal': 'nave_qr',
+            'nave_terminal_id': 'QR-POS-001',
+            'company_id': self.company.id,
+        })
+
+    def test_11_qr_payment_type_and_host(self):
+        """El QR es otro tipo de pago, con su propio host de sandbox."""
+        qr_method = self._make_qr_method()
+        self.assertEqual(qr_method._nave_payment_type(), 'static_qr')
+        self.assertEqual(self.pos_payment_method._nave_payment_type(), 'smart_pos')
+        self.assertEqual(self.provider._nave_get_api_url('static_qr'), 'https://api-sandbox.ranty.io')
+
+    @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.post')
+    def test_12_qr_intent_uses_its_own_endpoint(self, mock_post):
+        """El cobro por QR va a /static_qr y manda qr_amount, que Nave exige."""
+        mock_post.return_value = _mock_response({'id': 'intent-qr-1'})
+        qr_method = self._make_qr_method()
+
+        qr_method.nave_send_payment_intent(qr_method.id, amount=999.0, reference='POS-QR-001')
+
+        self.assertEqual(
+            mock_post.call_args[0][0],
+            'https://api-sandbox.ranty.io/api/payment_request/static_qr',
+        )
+        payload = mock_post.call_args[1]['json']
+        self.assertEqual(payload['transactions'][0]['qr_amount'], 'close')
+        self.assertEqual(payload['transactions'][0]['amount']['value'], '999.00')
+        self.assertEqual(payload['seller']['pos_id'], 'QR-POS-001')
+
+    @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.post')
+    def test_13_smart_pos_does_not_send_qr_amount(self, mock_post):
+        """Nave Point no lleva qr_amount: es un campo propio del QR."""
+        mock_post.return_value = _mock_response({'id': 'intent-1234'})
+
+        self.pos_payment_method.nave_send_payment_intent(
+            self.pos_payment_method.id, amount=100.0, reference='POS-001'
+        )
+
+        self.assertNotIn('qr_amount', mock_post.call_args[1]['json']['transactions'][0])
+
+    @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.get')
+    def test_14_qr_status_uses_its_own_host(self, mock_get):
+        """El polling del QR y la consulta del pago también van a api-sandbox."""
+        qr_intent = dict(INTENT_SUCCESS, payment_type='static_qr')
+        mock_get.side_effect = [_mock_response(qr_intent), _mock_response(PAYMENT_QR_APPROVED)]
+        qr_method = self._make_qr_method()
+
+        res = qr_method.nave_check_payment_status(qr_method.id, intent_id='intent-qr-1')
+
+        self.assertEqual(res['nave_payment_id'], 'pay-9999')
+        self.assertEqual(res['nave_payment']['wallet']['name'], 'mercado pago')
+        self.assertEqual(
+            mock_get.call_args_list[0][0][0],
+            'https://api-sandbox.ranty.io/api/payment_requests/intent-qr-1',
+        )
+        self.assertEqual(
+            mock_get.call_args_list[1][0][0],
+            'https://api-sandbox.ranty.io/ranty-payments/payments/pay-9999',
+        )
