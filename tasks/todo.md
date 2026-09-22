@@ -40,6 +40,9 @@
 > Plan detallado: `tasks/plan_homologacion_nave.md` (matriz de casos, evidencias y preguntas abiertas).
 
 ### Bloqueantes previos (no se puede homologar sin esto)
+> **Estado al 2026-09-22: 8 de 11 cerrados.** Quedan B2 y B6 (congelados hasta que Nave responda N12
+> sobre el endpoint de devolución) y B8 (QR interoperable, desarrollo nuevo).
+> Suite: **32 tests en verde** entre `payment_nave` y `pos_nave`.
 - [x] **B11** 🔴🔴 *(fix aplicado 2026-09-21, pendiente de verificación contra sandbox — casos S2/S3)* El POS consulta `GET /api/payment_requests/{id}` (estados de la **intención**: `SUCCESS_PROCESSED`, `FAILURE_PROCESSED`, `EXPIRED`…) pero el JS evalúa estados del **pago** (`APPROVED`, `REJECTED`). `APPROVED` nunca aparece en ese endpoint → **el camino feliz del Smart Point es inalcanzable** y el polling gira para siempre. Prioridad máxima, antes que B4.
   - Aplicado: catálogo `NAVE_STATUS` con los 7 estados de intención documentados + los del pago como alias tolerado; manejo explícito de `EXPIRED`, `DISABLED` y `BLOCKED`; estado desconocido se registra en consola y sigue esperando en vez de cortar.
   - Aplicado también **B4**: watchdog de 5 min atado al `duration_time`, tolerancia de 3 fallos de transporte seguidos antes de cortar, y distinción entre `silentCall` devolviendo `false` (error de servidor) y una respuesta válida de Nave.
@@ -49,11 +52,11 @@
 - [ ] **B2** Reembolso POS manda `"REFUND-CIEGO"` hardcodeado: falla siempre.
 - [x] **B3** *(657b23d)* El POS guarda el id de la *intención* en `transaction_id`, no el `payment_id` del pago. Resuelto: sale de `payment_attempts.payments[]`.
 - [x] **B4** *(resuelto junto con B11)* Polling del POS sin timeout ni manejo de `EXPIRED`/`DISABLED` → loop infinito; única salida "Force done".
-- [ ] **B5** SSRF: `payment_check_url` del webhook se usa sin validar el host → se puede forzar un pago aprobado.
+- [x] **B5** *(35a9ab7)* SSRF: `payment_check_url` del webhook se usa sin validar el host → se puede forzar un pago aprobado.
 - [ ] **B6** 🔴 El ciclo de devolución no cierra en **ningún** flujo (confirmado en alcance, D5): botón invisible en backend, `amount_to_refund` ignorado, `_set_canceled` sobre el registro equivocado, y el webhook `REFUNDED`/`CANCELLED` no modifica una tx en `done`. Además `nave_qr` declara `support_refund='partial'` y **Nave confirmó que es `full_only` (N10)**: corregir `data/payment_method_data.xml:33` + script de migración (el archivo es `noupdate="1"`) y declarar `full_only` en `_compute_feature_support_fields`.
-- [ ] **B7** El módulo nunca activa sus métodos de pago (falta `_get_default_payment_method_codes`). Verificado 2026-09-22: en instalación limpia **`card`, `naranja` y `nave_qr` quedan los tres inactivos**; en la base de homologación `card` y `nave_qr` están activos por causas ajenas al módulo. El resultado depende de la base, no del código.
+- [x] **B7** *(29d0e73)* El módulo nunca activa sus métodos de pago (falta `_get_default_payment_method_codes`). Verificado 2026-09-22: en instalación limpia **`card`, `naranja` y `nave_qr` quedan los tres inactivos**; en la base de homologación `card` y `nave_qr` están activos por causas ajenas al módulo. El resultado depende de la base, no del código.
 - [ ] **B8** QR interoperable presencial: **no implementado y CONFIRMADO EN ALCANCE (D4, 2026-09-21)**. Es desarrollo nuevo: endpoint `/api/payment_request/static_qr`, campo `qr_amount: "close"`, `pos_id` propio por QR físico. Homologable sin hardware vía el endpoint de simulación de sandbox (`doc_qr.md` §10).
-- [ ] **B9** Sin `ir.cron` de respaldo si se pierde el webhook.
+- [x] **B9** *(0cad826)* Sin `ir.cron` de respaldo si se pierde el webhook. Implementado: cada 15 min reconsulta la intención, saca el `payment_id` de `payment_attempts` y sigue el mismo camino que el webhook.
 - [x] **B10** *(22ce2f7)* Suite de `pos_nave` desalineada con el código. Reescrita y ampliada: **20 tests en verde** entre `pos_nave` y `payment_nave`.
 
 ### Riesgo de go-live (no bloquea la homologación)
