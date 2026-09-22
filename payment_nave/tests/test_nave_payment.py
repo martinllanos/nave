@@ -699,3 +699,41 @@ class TestNaveProvider(PaymentCommon):
 
         self.assertEqual(failing.state, 'pending', "La que falló queda como estaba")
         self.assertEqual(healthy.state, 'done', "La sana se concilia igual")
+
+    # ──────────────────────────────────────────────
+    # 9. CAMBIO DE AMBIENTE
+    # ──────────────────────────────────────────────
+
+    def _nave_has_cached_token(self):
+        return bool(self.nave_provider.nave_access_token)
+
+    def test_23_switching_environment_clears_the_token(self):
+        """Pasar de Prueba a Producción invalida el token cacheado.
+
+        El token dura hasta 24 h y no se revalida solo. Sin invalidarlo, el módulo seguiría
+        mandando un token de sandbox a la API de producción y todas las llamadas darían 401.
+        """
+        self._nave_arm_token()
+        self.assertTrue(self._nave_has_cached_token())
+
+        self.nave_provider.state = 'enabled'
+
+        self.assertFalse(self._nave_has_cached_token(),
+                         "Al cambiar de ambiente el token viejo no puede sobrevivir")
+        self.assertFalse(self.nave_provider.nave_token_expiry)
+
+    def test_24_changing_credentials_clears_the_token(self):
+        """Reemplazar las credenciales también invalida el token que emitieron las anteriores."""
+        self._nave_arm_token()
+
+        self.nave_provider.nave_client_id = 'otro_client_id'
+
+        self.assertFalse(self._nave_has_cached_token())
+
+    def test_25_unrelated_write_keeps_the_token(self):
+        """Un cambio ajeno no descarta el token: sólo ambiente y credenciales lo invalidan."""
+        self._nave_arm_token()
+
+        self.nave_provider.name = 'Nave Test renombrado'
+
+        self.assertTrue(self._nave_has_cached_token())

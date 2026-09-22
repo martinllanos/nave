@@ -145,6 +145,30 @@ class PaymentProvider(models.Model):
 
         return access_token
 
+    def write(self, vals):
+        """ Invalida el token cacheado cuando cambia el ambiente o las credenciales.
+
+        El token se guarda en el propio proveedor y sólo se renueva por vencimiento (hasta 24 h).
+        Al pasar de Prueba a Producción, o al reemplazar las credenciales, el token viejo sigue
+        siendo válido en el tiempo pero pertenece al otro ambiente: sin esto, el módulo mandaría
+        un token de sandbox a la API de producción hasta que expire, y todas las llamadas
+        fallarían con 401 sin que nada las reintente.
+        """
+        res = super().write(vals)
+        if not {'state', 'nave_client_id', 'nave_client_secret'} & set(vals):
+            return res
+        stale = self.filtered(lambda p: p.code == 'nave' and p.nave_access_token)
+        if stale:
+            _logger.info(
+                "[payment_nave] Se invalida el token cacheado de %s proveedor(es) "
+                "por cambio de ambiente o credenciales.", len(stale)
+            )
+            super(PaymentProvider, stale).write({
+                'nave_access_token': False,
+                'nave_token_expiry': False,
+            })
+        return res
+
     def _get_default_payment_method_codes(self):
         """ Métodos que se activan solos al habilitar el proveedor.
 
