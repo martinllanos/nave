@@ -440,3 +440,122 @@ class TestNaveProvider(PaymentCommon):
         })
         with self.assertRaises(UserError):
             wizard.action_generate_link()
+
+    # ──────────────────────────────────────────────
+    # 6. SEGURIDAD DEL WEBHOOK
+    # ──────────────────────────────────────────────
+
+    def _nave_make_tx(self, reference):
+        return self.env['payment.transaction'].create({
+            'provider_id': self.nave_provider.id,
+            'payment_method_id': self.payment_method_id,
+            'amount': 1500.00,
+            'currency_id': self.currency_ars.id,
+            'reference': reference,
+            'partner_id': self.partner.id,
+            'operation': 'online_redirect',
+        })
+
+    def _nave_arm_token(self):
+        self.nave_provider.write({
+            'nave_access_token': 'tok_test',
+            'nave_token_expiry': self.env['payment.provider']._fields['nave_token_expiry'].from_string('2099-01-01 00:00:00'),
+        })
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_14_webhook_check_url_outside_nave_is_ignored(self, mock_get):
+        """Una payment_check_url de otro dominio no se consulta: el webhook no viene firmado.
+
+        Sin esta restricción, quien adivine una referencia puede apuntar la verificación a un
+        servidor propio que responda APPROVED y dar por pagada una factura ajena.
+        """
+        mock_get.return_value = MagicMock(
+            json=MagicMock(return_value={'id': 'pay-evil', 'status': {'name': 'APPROVED'}}),
+            raise_for_status=MagicMock(return_value=None),
+        )
+        self._nave_arm_token()
+        tx = self._nave_make_tx('TEST-NAVE-SSRF-001')
+
+        tx._process_notification_data({
+            'payment_id': 'pay-evil',
+            'external_payment_id': 'TEST-NAVE-SSRF-001',
+            'payment_check_url': 'https://atacante.example.com/ranty-payments/payments/pay-evil',
+        })
+
+        called_url = mock_get.call_args[0][0]
+        self.assertNotIn('atacante.example.com', called_url,
+                         "Nunca se debe consultar un host ajeno a Nave")
+        self.assertEqual(
+            called_url,
+            'https://api-sandbox.ranty.io/ranty-payments/payments/pay-evil',
+            "Debe caer al fallback construido localmente",
+        )
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_15_webhook_check_url_lookalike_is_ignored(self, mock_get):
+        """Un dominio que sólo se parece al de Nave tampoco se acepta."""
+        mock_get.return_value = MagicMock(
+            json=MagicMock(return_value={'id': 'pay-x', 'status': {'name': 'APPROVED'}}),
+            raise_for_status=MagicMock(return_value=None),
+        )
+        self._nave_arm_token()
+        tx = self._nave_make_tx('TEST-NAVE-SSRF-002')
+
+        tx._process_notification_data({
+            'payment_id': 'pay-x',
+            'external_payment_id': 'TEST-NAVE-SSRF-002',
+            'payment_check_url': 'https://ranty.io.atacante.example.com/payments/pay-x',
+        })
+
+        self.assertNotIn('atacante', mock_get.call_args[0][0])
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_16_webhook_check_url_from_nave_is_used(self, mock_get):
+        """La URL legítima de Nave sí se usa, y se normaliza a https.
+
+        Nave la documenta sin esquema; es además la que destrabó el checkout, porque el host que
+        construimos localmente no siempre es el que corresponde.
+        """
+        mock_get.return_value = MagicMock(
+            json=MagicMock(return_value={
+                'id': 'pay-ok',
+                'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
+                'wallet': {'name': 'modo'},
+            }),
+            raise_for_status=MagicMock(return_value=None),
+        )
+        self._nave_arm_token()
+        tx = self._nave_make_tx('TEST-NAVE-SSRF-003')
+
+        tx._process_notification_data({
+            'payment_id': 'pay-ok',
+            'external_payment_id': 'TEST-NAVE-SSRF-003',
+            'payment_check_url': 'api-sandbox.ranty.io/ranty-payments/payments/pay-ok',
+        })
+
+        self.assertEqual(
+            mock_get.call_args[0][0],
+            'https://api-sandbox.ranty.io/ranty-payments/payments/pay-ok',
+        )
+        self.assertEqual(tx.state, 'done')
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_17_webhook_check_url_drops_userinfo(self, mock_get):
+        """Se descarta el userinfo de la URL, que sólo sirve para confundir al que lee el log."""
+        mock_get.return_value = MagicMock(
+            json=MagicMock(return_value={'id': 'pay-u', 'status': {'name': 'APPROVED'}}),
+            raise_for_status=MagicMock(return_value=None),
+        )
+        self._nave_arm_token()
+        tx = self._nave_make_tx('TEST-NAVE-SSRF-004')
+
+        tx._process_notification_data({
+            'payment_id': 'pay-u',
+            'external_payment_id': 'TEST-NAVE-SSRF-004',
+            'payment_check_url': 'https://atacante.example.com@api-sandbox.ranty.io/payments/pay-u',
+        })
+
+        self.assertEqual(
+            mock_get.call_args[0][0],
+            'https://api-sandbox.ranty.io/payments/pay-u',
+        )

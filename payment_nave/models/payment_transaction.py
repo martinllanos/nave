@@ -2,10 +2,13 @@
 
 import logging
 import requests
+from urllib.parse import urlparse, urlunparse
 from werkzeug import urls
 
 from odoo import api, fields, models, _
 from odoo.exceptions import UserError, ValidationError
+
+from .payment_provider import NAVE_TRUSTED_DOMAIN
 
 _logger = logging.getLogger(__name__)
 
@@ -235,6 +238,45 @@ class PaymentTransaction(models.Model):
 
         return tx
 
+    def _nave_get_check_url(self, payment_id, notification_data):
+        """ URL contra la que se verifica el estado real del pago.
+
+        Nave manda en el webhook la `payment_check_url` a consultar, y usarla es lo que hace
+        funcionar el flujo: la URL que podemos construir nosotros no siempre coincide con el host
+        que corresponde. Pero el webhook **no viene firmado**, así que ese valor es dato no
+        confiable: si se usara tal cual, alguien que adivine una referencia podría apuntar la
+        verificación a un servidor propio que responda APPROVED y dar por pagada una factura.
+
+        Sólo se acepta si apunta al dominio de Nave. En cualquier otro caso se cae al fallback
+        construido localmente, que es seguro por definición.
+        """
+        self.ensure_one()
+        fallback = f"{self.provider_id._nave_get_api_url()}/ranty-payments/payments/{payment_id}"
+
+        check_url = (notification_data.get('payment_check_url') or '').strip()
+        if not check_url:
+            return fallback
+
+        # Nave documenta la URL sin esquema ("api.ranty.io/ranty-payments/..."), así que hay que
+        # normalizarla antes de poder mirarle el host. Se fuerza https en todos los casos.
+        if not check_url.startswith(('http://', 'https://')):
+            check_url = f"https://{check_url}"
+        parsed = urlparse(check_url)
+        host = (parsed.hostname or '').lower()
+
+        if host != NAVE_TRUSTED_DOMAIN and not host.endswith(f".{NAVE_TRUSTED_DOMAIN}"):
+            _logger.warning(
+                "[payment_nave] Webhook de %s con payment_check_url fuera de %s (%r). "
+                "Se ignora y se verifica contra la URL propia.",
+                self.reference, NAVE_TRUSTED_DOMAIN, check_url,
+            )
+            return fallback
+
+        # Se reconstruye el netloc a partir del host y el puerto, descartando cualquier
+        # userinfo del tipo "https://otro-host@api.ranty.io/...".
+        netloc = f"{host}:{parsed.port}" if parsed.port else host
+        return urlunparse(parsed._replace(scheme='https', netloc=netloc))
+
     def _process_notification_data(self, notification_data):
         """
         Procesa los datos recibidos del Webhook.
@@ -253,13 +295,7 @@ class PaymentTransaction(models.Model):
 
         # GET seguro para comprobar el estado real de la transacción
         token = self.provider_id._nave_get_access_token()
-        check_url = notification_data.get('payment_check_url')
-        if check_url:
-            if not check_url.startswith(('http://', 'https://')):
-                check_url = f"https://{check_url}"
-        else:
-            base_url = self.provider_id._nave_get_api_url()
-            check_url = f"{base_url}/ranty-payments/payments/{payment_id}"
+        check_url = self._nave_get_check_url(payment_id, notification_data)
 
         headers = {
             'Authorization': f"Bearer {token}",

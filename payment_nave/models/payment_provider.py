@@ -17,6 +17,11 @@ NAVE_SANDBOX_API_URLS = {
 NAVE_SANDBOX_API_URL = 'https://api-sandbox.ranty.io'
 NAVE_PRODUCTION_API_URL = 'https://api.ranty.io'
 
+# Único dominio al que se le permite a un webhook redirigirnos. El payload de Nave no viene
+# firmado, así que la `payment_check_url` que trae es dato no confiable: sin esta restricción,
+# cualquiera que adivine una referencia puede apuntar la verificación a un host propio.
+NAVE_TRUSTED_DOMAIN = 'ranty.io'
+
 
 class PaymentProvider(models.Model):
     _inherit = 'payment.provider'
