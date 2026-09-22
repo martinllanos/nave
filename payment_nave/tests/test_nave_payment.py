@@ -5,6 +5,7 @@
 
 from unittest.mock import patch, MagicMock
 
+from odoo import Command
 from odoo.tests import tagged
 from odoo.addons.payment.tests.common import PaymentCommon
 
@@ -21,6 +22,10 @@ class TestNaveProvider(PaymentCommon):
     def setUpClass(cls):
         super().setUpClass()
 
+        # El proveedor real queda vinculado a sus métodos de pago por el XML del módulo; el de
+        # los tests se crea a mano, así que hay que asociarlos igual o el wizard no puede armar
+        # la transacción (payment_method_id es obligatorio).
+        cls.nave_qr_method = cls.env.ref('payment_nave.payment_method_nave_qr')
         cls.nave_provider = cls.env['payment.provider'].create({
             'name': 'Nave Test',
             'code': 'nave',
@@ -29,6 +34,7 @@ class TestNaveProvider(PaymentCommon):
             'nave_client_id': 'test_client_id_12345',
             'nave_client_secret': 'test_client_secret_xyz',
             'nave_pos_id': 'pos-test-uuid-001',
+            'payment_method_ids': [Command.set([cls.nave_qr_method.id])],
         })
 
         cls.currency_ars = cls.env.ref('base.ARS')
@@ -291,6 +297,20 @@ class TestNaveProvider(PaymentCommon):
         self.assertIn('payment_link', call_url,
                       "El wizard debe usar el endpoint /payment_link, no /ecommerce")
 
+        # El link debe quedar respaldado por una transacción, o el webhook no lo encuentra.
+        tx = self.env['payment.transaction'].search([
+            ('provider_id', '=', self.nave_provider.id),
+            ('nave_payment_request_id', '=', 'pr-link-001'),
+        ])
+        self.assertEqual(len(tx), 1, "El wizard debe crear exactamente una transacción")
+        self.assertEqual(tx.state, 'pending')
+        self.assertEqual(tx.amount, 2500.00)
+        self.assertEqual(tx.nave_checkout_url, 'https://checkout.ranty.io/link/pr-link-001')
+
+        # La referencia enviada a Nave y la de la transacción tienen que ser idénticas.
+        payload = mock_post.call_args[1]['json']
+        self.assertEqual(payload['external_payment_id'], tx.reference)
+
     def test_09_link_wizard_amount_validation(self):
         """Verifica que el wizard rechaza montos menores o iguales a 0."""
         wizard = self.env['nave.payment.link.wizard'].create({
@@ -318,3 +338,105 @@ class TestNaveProvider(PaymentCommon):
         formatted_value = products[0]['unit_price']['value']
         self.assertEqual(formatted_value, '999.50',
                          "El monto debe tener exactamente 2 decimales en formato string")
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    @patch('odoo.addons.payment_nave.models.nave_link_wizard.requests.post')
+    def test_11_link_wizard_webhook_reconciles(self, mock_post, mock_get):
+        """El webhook del pago de un link encuentra su transacción y la concilia.
+
+        Es el circuito completo que antes se cortaba: el wizard no creaba transacción, el webhook
+        no la encontraba, el controller devolvía 500 y la factura quedaba impaga para siempre.
+        """
+        mock_post.return_value = MagicMock(
+            json=MagicMock(return_value={
+                'id': 'pr-link-011',
+                'checkout_url': 'https://checkout.ranty.io/link/pr-link-011',
+            }),
+            raise_for_status=MagicMock(return_value=None),
+        )
+        mock_get.return_value = MagicMock(
+            json=MagicMock(return_value={
+                'id': 'pay-link-011',
+                'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
+                'wallet': {'name': 'modo'},
+            }),
+            raise_for_status=MagicMock(return_value=None),
+        )
+        self.nave_provider.write({
+            'nave_access_token': 'tok_test',
+            'nave_token_expiry': self.env['payment.provider']._fields['nave_token_expiry'].from_string('2099-01-01 00:00:00'),
+        })
+
+        wizard = self.env['nave.payment.link.wizard'].create({
+            'provider_id': self.nave_provider.id,
+            'company_id': self.env.company.id,
+            'partner_id': self.partner.id,
+            'amount': 3300.00,
+            'currency_id': self.currency_ars.id,
+            'external_reference': 'INV-2026-0011',
+        })
+        wizard.action_generate_link()
+
+        # Nave notifica con el external_payment_id que le mandamos.
+        external_payment_id = mock_post.call_args[1]['json']['external_payment_id']
+        tx = self.env['payment.transaction']._get_tx_from_notification_data(
+            'nave', {'external_payment_id': external_payment_id, 'payment_id': 'pay-link-011'}
+        )
+
+        self.assertTrue(tx, "El webhook debe poder encontrar la transacción del link")
+        tx._process_notification_data({
+            'external_payment_id': external_payment_id,
+            'payment_id': 'pay-link-011',
+        })
+        self.assertEqual(tx.state, 'done')
+        self.assertEqual(tx.nave_payment_id, 'pay-link-011')
+
+    @patch('odoo.addons.payment_nave.models.nave_link_wizard.requests.post')
+    def test_12_link_wizard_reference_is_unique(self, mock_post):
+        """Dos links con la misma referencia externa producen transacciones distintas."""
+        mock_post.return_value = MagicMock(
+            json=MagicMock(return_value={
+                'id': 'pr-link-012',
+                'checkout_url': 'https://checkout.ranty.io/link/pr-link-012',
+            }),
+            raise_for_status=MagicMock(return_value=None),
+        )
+        self.nave_provider.write({
+            'nave_access_token': 'tok_test',
+            'nave_token_expiry': self.env['payment.provider']._fields['nave_token_expiry'].from_string('2099-01-01 00:00:00'),
+        })
+
+        references = []
+        for _i in range(2):
+            wizard = self.env['nave.payment.link.wizard'].create({
+                'provider_id': self.nave_provider.id,
+                'company_id': self.env.company.id,
+                'partner_id': self.partner.id,
+                'amount': 1000.00,
+                'currency_id': self.currency_ars.id,
+                'external_reference': 'INV-2026-0012',
+            })
+            wizard.action_generate_link()
+            references.append(mock_post.call_args[1]['json']['external_payment_id'])
+
+        self.assertEqual(references[0], 'INV-2026-0012')
+        self.assertNotEqual(references[0], references[1],
+                            "Regenerar el link no puede reusar el mismo external_payment_id")
+
+    def test_13_link_wizard_rejects_long_reference(self):
+        """Una referencia que excede el tope de Nave se rechaza en vez de truncarse.
+
+        Truncar rompería la conciliación: el webhook llega con el id truncado y la búsqueda por
+        referencia completa no lo encuentra.
+        """
+        from odoo.exceptions import UserError
+        wizard = self.env['nave.payment.link.wizard'].create({
+            'provider_id': self.nave_provider.id,
+            'company_id': self.env.company.id,
+            'partner_id': self.partner.id,
+            'amount': 1000.00,
+            'currency_id': self.currency_ars.id,
+            'external_reference': 'X' * 40,
+        })
+        with self.assertRaises(UserError):
+            wizard.action_generate_link()
