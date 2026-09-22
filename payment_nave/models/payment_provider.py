@@ -9,6 +9,14 @@ from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
 
+# Nave Point (payment_type 'smart_pos') se sirve desde un host de sandbox distinto del resto de los
+# flujos. En producción todos comparten el mismo. Ver tasks/doc_actualizada_2026-09-22.md §3.
+NAVE_SANDBOX_API_URLS = {
+    'smart_pos': 'https://e3-api.ranty.io',
+}
+NAVE_SANDBOX_API_URL = 'https://api-sandbox.ranty.io'
+NAVE_PRODUCTION_API_URL = 'https://api.ranty.io'
+
 
 class PaymentProvider(models.Model):
     _inherit = 'payment.provider'
@@ -135,9 +143,14 @@ class PaymentProvider(models.Model):
             return 'https://homoservices.apinaranja.com/security-ms/api/security/auth0/b2b/m2msPrivate'
         return 'https://services.apinaranja.com/security-ms/api/security/auth0/b2b/m2msPrivate'
 
-    def _nave_get_api_url(self):
-        """ Retorna la URL base de la API según el estado del proveedor (Prueba o Producción). """
+    def _nave_get_api_url(self, payment_type=None):
+        """ Retorna la URL base de la API según el estado del proveedor y el tipo de pago.
+
+        :param str payment_type: tipo de pago de Nave ('smart_pos', 'static_qr', 'payment_link',
+            'ecommerce'). Sólo 'smart_pos' usa un host de sandbox propio; el resto comparte
+            api-sandbox. En producción el host es el mismo para todos.
+        """
         self.ensure_one()
         if self.state == 'test':
-            return 'https://api-sandbox.ranty.io'
-        return 'https://api.ranty.io'
+            return NAVE_SANDBOX_API_URLS.get(payment_type, NAVE_SANDBOX_API_URL)
+        return NAVE_PRODUCTION_API_URL
