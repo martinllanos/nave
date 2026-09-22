@@ -752,7 +752,11 @@ deciden cómo se escribe el fix de B11.
 
 ### Bloque H — QR interoperable presencial
 
-> 🚫 **Bloqueado por B8** (desarrollo pendiente). Se puede ejecutar **sin billetera real** usando el
+> ✅ **B8 implementado el 2026-09-22** (`61d5101`), con tests unitarios. Falta ejercitarlo contra
+> sandbox, para lo cual hace falta el `pos_id` de un QR de prueba (P13).
+> 🟢 Además del simulador web, la doc publica un **simulador PCT** que paga *nuestra propia*
+> intención: `PUT /qrtools/transfer_payment/simulation/payment` con el `payment_request_id` y el
+> monto (`gateway`: `nxranty` o `coelsa`). Es el camino para H3 sin hardware ni billetera. Se puede ejecutar **sin billetera real** usando el
 > endpoint de simulación de sandbox: `GET /instore/external/resolve?data={QR_FIJO}&access_token={TOKEN}`
 > (`doc_qr.md` §10), que dispara el pago y el webhook end-to-end.
 
