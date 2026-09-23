@@ -332,8 +332,9 @@ Consecuencias para el plan:
 | P14 | **Correo enviado a Nave el 2026-09-22** con N9 (acceso al comercio de prueba y `pos_id`), N12 (devoluciones por API) e ingreso manual de tarjetas | Comercial | ⏳ **esperando respuesta** |
 | P3 | Registrar la `notification_url` del lado de Nave | Comercial | ✅ **hecho**. Es **la misma URL para homologación y producción**: `https://www.onlyone.ar/payment/nave/webhook`. Lo que cambia es el estado `test`/`enabled` del provider — ver §3.7 |
 | P4 | Terminal Smart Point física de prueba | Comercial | ⚠️ **recibida (serie `L40000978`) pero NO vinculable**: pide un local "test" que no existe en nuestro portal — ver §3.10 |
-| P13 | Vincular la terminal `L40000978` | Comercial | ⏳ **el código del 2026-08-14 caducó**. Pedido uno nuevo a Nave en el mismo hilo (borrador 2 en `tasks/correo_nave_n9.md`) |
-| P15 | Cargar el `pos_id` de la terminal (`b1c04ade-…`) en el método de pago POS | Técnico | ⏳ **bloqueado por la sesión POS/00005**, abierta desde el 2026-08-11 con 0 órdenes. Odoo no deja modificar un método de pago con sesiones abiertas: *"Cierre y valide las siguientes sesiones de PdV abiertas antes de modificar este método de pago"* |
+| P13 | Vincular la terminal `L40000978` | Comercial | ✅ **RESUELTO 2026-09-23**. Nave mandó un código nuevo y la terminal quedó vinculada. Confirmó además el mismo `pos_id` `b1c04ade-…` |
+| P16 | 🔴 Conseguir **plásticos de prueba** para la terminal | Comercial | ⬜ **bloquea el cobro con tarjeta**: el equipo es de test, así que no acepta tarjetas reales, y no tenemos tarjetas de prueba físicas |
+| P15 | Cargar el `pos_id` de la terminal (`b1c04ade-…`) en el método de pago POS | Técnico | ✅ **hecho 2026-09-23**. Requirió cerrar la sesión POS/00005: Odoo no deja modificar un método de pago con sesiones abiertas |
 | P12 | 🔴 Obtener de Nave el **`pos_id` (UUID) que corresponde a la terminal `L40000978`** y cargarlo en `nave_terminal_id`. Hoy ese campo tiene `f71ba756-1d80-4ab3-9f43-5dc247fd6c4a`, que es **el mismo UUID que el `nave_pos_id` de e-commerce** del provider — ver §3.5 | Técnico | ⬜ |
 | P5 | Confirmar con Nave el host de sandbox de Smart POS: `e3-api.ranty.io` (doc) vs `api-sandbox.ranty.io` (código) | Técnico | ⬜ |
 | P6 | Confirmar path de auth para QR: `m2ms` vs `m2msPrivate` | Técnico | ⬜ |
@@ -449,6 +450,31 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
+
+### 3.14 Terminal vinculada, pero sólo cobra por QR (2026-09-23)
+
+Nave envió un código de vinculación nuevo y **la terminal `L40000978` quedó operativa**. Confirmaron
+además el mismo `pos_id`: `b1c04ade-dec9-4ca0-9fd9-8464c9006764`.
+
+**Limitación nueva**: no tenemos **plásticos de prueba**. El equipo es de test, así que no procesa
+tarjetas reales, y sin tarjetas de prueba físicas el cobro con chip/contactless no se puede ejercitar.
+
+Lo que sí se puede, y no es poco: **la terminal cobra por QR**. El flujo `smart_pos` completo
+—crear la intención, entregarla al equipo, que el cliente pague, y que Odoo lo detecte por polling—
+queda ejercitable de punta a punta, pagando con billetera en vez de tarjeta.
+
+| Caso | Estado |
+|---|---|
+| C1 — vocabulario real de estados | ✅ **ahora ejecutable**. Es la prueba más valiosa pendiente |
+| C2b — camino feliz completo | ✅ ejecutable vía QR desde la terminal |
+| C3 — rechazo | ⚠️ difícil de provocar sin tarjeta |
+| C2 — cobro con chip | 🚫 **bloqueado por P16** (sin plásticos de prueba) |
+| C12 — datos del ticket | ⚠️ parcial: un pago por billetera devuelve `wallet_name`, no marca ni últimos 4 |
+
+**Consecuencia sobre el código**: `_apply_payment_details` llena marca, tipo, últimos 4, titular y
+emisor desde `payment_method`. En un cobro por QR esos campos vienen vacíos y el ticket muestra sólo
+la billetera. Es el comportamiento correcto, pero significa que **la parte de tarjeta del ticket
+queda sin verificar** hasta que haya plásticos.
 
 ### 3.13 Verificación en producción tras cargar el `pos_id` correcto (2026-09-23)
 
