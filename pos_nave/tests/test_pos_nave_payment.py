@@ -368,3 +368,46 @@ class TestPosNavePayment(TransactionCase):
         )
 
         self.assertEqual(mock_post.call_args[1]['timeout'], 42)
+
+    # ──────────────────────────────────────────────
+    # 8. CANCELACIÓN DE INTENCIÓN
+    # ──────────────────────────────────────────────
+
+    @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.delete')
+    def test_18_cancel_reports_nave_rejection(self, mock_delete):
+        """Nave rechaza la baja de una intención de terminal y hay que decirlo.
+
+        Su catálogo sólo admite dar de baja payment_link, dynamic_qr y static_qr, así que un
+        smart_pos responde 400. Callarlo dejaría al cajero creyendo que canceló un cobro que sigue
+        vivo hasta expirar.
+        """
+        import requests as _requests
+        response = MagicMock(status_code=400)
+        response.json.return_value = {
+            'code': 'payment_request_delete_failed',
+            'message': 'The payment request could not be deleted.',
+        }
+        mock_delete.side_effect = _requests.exceptions.HTTPError(response=response)
+
+        res = self.pos_payment_method.nave_cancel_payment_intent(
+            self.pos_payment_method.id, intent_id='intent-1234'
+        )
+
+        self.assertTrue(res.get('error'))
+        self.assertIn('could not be deleted', res.get('message', ''))
+        self.assertIn('400', res.get('message', ''))
+
+    @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.delete')
+    def test_19_cancel_success(self, mock_delete):
+        """Una baja aceptada devuelve éxito y usa el endpoint de intenciones."""
+        mock_delete.return_value = _mock_response({'message': 'Payment request deleted'})
+
+        res = self.pos_payment_method.nave_cancel_payment_intent(
+            self.pos_payment_method.id, intent_id='intent-1234'
+        )
+
+        self.assertTrue(res.get('success'))
+        self.assertEqual(
+            mock_delete.call_args[0][0],
+            'https://e3-api.ranty.io/api/payment_requests/intent-1234',
+        )

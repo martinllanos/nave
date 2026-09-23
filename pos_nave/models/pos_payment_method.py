@@ -316,8 +316,10 @@ class PosPaymentMethod(models.Model):
             response.raise_for_status()
             return {'success': True}
         except requests.exceptions.RequestException as e:
+            # Nave responde 400 al intentar dar de baja una intención de terminal: su catálogo de
+            # errores sólo admite baja para payment_link, dynamic_qr y static_qr.
             _logger.error("[pos_nave] Error cancelando intención en Nave: %s", e)
-            return {'error': True, 'message': str(e)}
+            return {'error': True, 'message': self._nave_error_message(e)}
 
     @api.model
     def nave_refund_payment(self, payment_method_id, transaction_id, amount):

@@ -367,7 +367,7 @@ export class PaymentNave extends PaymentInterface {
         super.send_payment_cancel(...arguments);
         const line = this.pos.get_order().get_selected_paymentline();
         const payment_method_id = this.payment_method_id.id;
-        
+
         // Detener polling localmente
         this._stop_polling();
 
@@ -376,21 +376,33 @@ export class PaymentNave extends PaymentInterface {
             return true;
         }
 
-        try {
-            // Mandar petición de cancelación a la terminal Nave
-            await this.pos.data.silentCall(
-                "pos.payment.method",
-                "nave_cancel_payment_intent",
-                [[payment_method_id], line.transaction_id]
+        const data = await this.pos.data.silentCall(
+            "pos.payment.method",
+            "nave_cancel_payment_intent",
+            [[payment_method_id], line.transaction_id]
+        );
+
+        // Nave rechaza la baja de las intenciones de terminal: su catálogo sólo admite dar de baja
+        // payment_link, dynamic_qr y static_qr. Callarlo sería peor que el error: el cajero daría
+        // por cancelado un cobro que sigue vivo hasta que expira, y si el cliente apoya la tarjeta
+        // en ese lapso, se cobra.
+        if (!data || data.error) {
+            this._showError(
+                _t(
+                    "Odoo dejó de esperar el cobro, pero Nave no confirmó la baja: el cobro puede " +
+                    "seguir activo en la terminal. Cancelalo desde el equipo antes de reintentar.%s",
+                    data && data.message ? `\n\n${data.message}` : ""
+                ),
+                _t("La terminal puede seguir cobrando")
             );
-            line.set_payment_status("retry");
-            return true;
-        } catch (error) {
-            console.error("Cancel Error:", error);
-            // Igual permitimos reintentar o borrar línea en el POS
-            line.set_payment_status("retry");
-            return true;
         }
+
+        // Se devuelve true en todos los casos a propósito: con false, el POS deja la línea en
+        // "esperando tarjeta" (ver sendPaymentCancel del core) y el polling ya está detenido, con
+        // lo cual el cajero queda trabado sin nada que lo saque de ahí. Es preferible liberar la
+        // pantalla y avisar por diálogo qué pasó realmente.
+        line.set_payment_status("retry");
+        return true;
     }
 
     // ──────────────────────────────────────────────
