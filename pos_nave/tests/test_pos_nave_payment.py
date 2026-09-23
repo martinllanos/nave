@@ -333,3 +333,38 @@ class TestPosNavePayment(TransactionCase):
             mock_get.call_args_list[1][0][0],
             'https://api-sandbox.ranty.io/ranty-payments/payments/pay-9999',
         )
+
+    # ──────────────────────────────────────────────
+    # 7. TIMEOUTS
+    # ──────────────────────────────────────────────
+
+    def test_15_timeouts_have_defaults_and_overrides(self):
+        """Crear la intención espera más que las consultas de estado.
+
+        Nave tiene que alcanzar la terminal física antes de responder, mientras que el polling
+        corre cada 3 segundos y no puede quedarse esperando.
+        """
+        method = self.pos_payment_method
+        self.assertEqual(method._nave_timeout('intent'), 30)
+        self.assertEqual(method._nave_timeout('status'), 5)
+        self.assertGreater(method._nave_timeout('intent'), method._nave_timeout('status'))
+
+        self.env['ir.config_parameter'].sudo().set_param('pos_nave.timeout_intent', '45')
+        self.assertEqual(method._nave_timeout('intent'), 45)
+
+    def test_16_invalid_timeout_falls_back_to_default(self):
+        """Un parámetro mal cargado no puede romper un cobro."""
+        self.env['ir.config_parameter'].sudo().set_param('pos_nave.timeout_intent', 'treinta')
+        self.assertEqual(self.pos_payment_method._nave_timeout('intent'), 30)
+
+    @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.post')
+    def test_17_intent_uses_the_configured_timeout(self, mock_post):
+        """El timeout configurado llega efectivamente a la llamada."""
+        mock_post.return_value = _mock_response({'id': 'intent-1234'})
+        self.env['ir.config_parameter'].sudo().set_param('pos_nave.timeout_intent', '42')
+
+        self.pos_payment_method.nave_send_payment_intent(
+            self.pos_payment_method.id, amount=100.0, reference='POS-TO-1'
+        )
+
+        self.assertEqual(mock_post.call_args[1]['timeout'], 42)

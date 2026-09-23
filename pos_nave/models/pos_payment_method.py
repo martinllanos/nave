@@ -7,6 +7,21 @@ from odoo.exceptions import UserError, AccessError
 
 _logger = logging.getLogger(__name__)
 
+# Timeouts de las llamadas a Nave, en segundos.
+#
+# Crear la intención es la más lenta con diferencia: Nave tiene que alcanzar la terminal física,
+# que puede estar en 4G, y recién ahí responde. Diez segundos se quedaban cortos incluso con la
+# API sana (los hosts responden en ~0,3 s, así que no es un problema de red). Las consultas de
+# estado sí tienen que ser rápidas: corren cada 3 segundos dentro del bucle de polling.
+#
+# Ajustables con los parámetros de sistema `pos_nave.timeout_<nombre>`.
+NAVE_TIMEOUTS = {
+    'intent': 30,
+    'status': 5,
+    'cancel': 10,
+    'refund': 15,
+}
+
 
 class PosPaymentMethod(models.Model):
     _inherit = 'pos.payment.method'
@@ -120,8 +135,10 @@ class PosPaymentMethod(models.Model):
 
         _logger.info("[pos_nave] Enviando solicitud Smart POS a la terminal %s (Ref: %s)", pos_id, reference)
 
+        timeout = payment_method._nave_timeout('intent')
+
         try:
-            response = requests.post(api_url, json=payload, headers=headers, timeout=10)
+            response = requests.post(api_url, json=payload, headers=headers, timeout=timeout)
             response.raise_for_status()
             data = response.json()
             return data
@@ -156,8 +173,10 @@ class PosPaymentMethod(models.Model):
             'Accept': 'application/json',
         }
 
+        timeout = payment_method._nave_timeout('status')
+
         try:
-            response = requests.get(api_url, headers=headers, timeout=5)
+            response = requests.get(api_url, headers=headers, timeout=timeout)
             response.raise_for_status()
             data = response.json()
             _logger.debug("[pos_nave] Estado de intención %s: %s", intent_id, data)
@@ -179,6 +198,21 @@ class PosPaymentMethod(models.Model):
     # ──────────────────────────────────────────────────────────────────────────
     # Helpers internos
     # ──────────────────────────────────────────────────────────────────────────
+
+    def _nave_timeout(self, kind):
+        """ Timeout en segundos para una llamada a Nave, con override por parámetro de sistema. """
+        default = NAVE_TIMEOUTS[kind]
+        param = self.env['ir.config_parameter'].sudo().get_param(
+            f'pos_nave.timeout_{kind}', default
+        )
+        try:
+            return int(param)
+        except (TypeError, ValueError):
+            _logger.warning(
+                "[pos_nave] pos_nave.timeout_%s no es un entero (%r). Se usa %s.",
+                kind, param, default,
+            )
+            return default
 
     def _nave_error_message(self, exc):
         """ Extrae un mensaje legible de una excepción de `requests` contra la API de Nave. """
@@ -227,8 +261,10 @@ class PosPaymentMethod(models.Model):
             'Authorization': f"Bearer {token}",
             'Accept': 'application/json',
         }
+        timeout = self._nave_timeout('status')
+
         try:
-            response = requests.get(api_url, headers=headers, timeout=5)
+            response = requests.get(api_url, headers=headers, timeout=timeout)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -273,8 +309,10 @@ class PosPaymentMethod(models.Model):
             }
         }
 
+        timeout = payment_method._nave_timeout('cancel')
+
         try:
-            response = requests.delete(api_url, json=payload, headers=headers, timeout=5)
+            response = requests.delete(api_url, json=payload, headers=headers, timeout=timeout)
             response.raise_for_status()
             return {'success': True}
         except requests.exceptions.RequestException as e:
@@ -303,8 +341,10 @@ class PosPaymentMethod(models.Model):
             'Accept': 'application/json',
         }
 
+        timeout = payment_method._nave_timeout('refund')
+
         try:
-            response = requests.delete(api_url, headers=headers, timeout=10)
+            response = requests.delete(api_url, headers=headers, timeout=timeout)
             response.raise_for_status()
             data = response.json()
             return data
