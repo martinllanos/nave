@@ -333,7 +333,8 @@ Consecuencias para el plan:
 | P3 | Registrar la `notification_url` del lado de Nave | Comercial | ✅ **hecho**. Es **la misma URL para homologación y producción**: `https://www.onlyone.ar/payment/nave/webhook`. Lo que cambia es el estado `test`/`enabled` del provider — ver §3.7 |
 | P4 | Terminal Smart Point física de prueba | Comercial | ⚠️ **recibida (serie `L40000978`) pero NO vinculable**: pide un local "test" que no existe en nuestro portal — ver §3.10 |
 | P13 | Vincular la terminal `L40000978` | Comercial | ✅ **RESUELTO 2026-09-23**. Nave mandó un código nuevo y la terminal quedó vinculada. Confirmó además el mismo `pos_id` `b1c04ade-…` |
-| P16 | 🔴 Conseguir **plásticos de prueba** para la terminal | Comercial | ⬜ **bloquea el cobro con tarjeta**: el equipo es de test, así que no acepta tarjetas reales, y no tenemos tarjetas de prueba físicas |
+| P16 | Cobro con tarjeta física | Comercial | ⏳ **destrabado el 2026-09-28**: llega la terminal de **producción** y se prueba con plástico real, bajo los topes de §3.11 |
+| P17 | 🔴 Obtener el **`pos_id` de la terminal de producción** | Comercial | ⬜ Es un dispositivo distinto del de test: tiene su propio `pos_id`. Pedirlo junto con la terminal |
 | P15 | Cargar el `pos_id` de la terminal (`b1c04ade-…`) en el método de pago POS | Técnico | ✅ **hecho 2026-09-23**. Requirió cerrar la sesión POS/00005: Odoo no deja modificar un método de pago con sesiones abiertas |
 | P12 | 🔴 Obtener de Nave el **`pos_id` (UUID) que corresponde a la terminal `L40000978`** y cargarlo en `nave_terminal_id`. Hoy ese campo tiene `f71ba756-1d80-4ab3-9f43-5dc247fd6c4a`, que es **el mismo UUID que el `nave_pos_id` de e-commerce** del provider — ver §3.5 | Técnico | ⬜ |
 | P5 | Confirmar con Nave el host de sandbox de Smart POS: `e3-api.ranty.io` (doc) vs `api-sandbox.ranty.io` (código) | Técnico | ⬜ |
@@ -450,6 +451,30 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
+
+### 3.15 Cronograma: la terminal de producción llega el 2026-09-28
+
+| Hasta el 28/09 | Desde el 28/09 |
+|---|---|
+| Terminal de **test**, sólo cobra por QR | Terminal de **producción**, cobra con plástico real |
+| Ejercitar C1, C2b y B3 pagando con billetera | C2 (chip), C3 (rechazo) y C12 (ticket completo) |
+| Proveedor en `test` | Proveedor en `enabled` (§3.11) |
+
+**Tres cosas que hay que tener listas para el lunes:**
+
+1. **El `pos_id` de la terminal nueva** (P17). Es otro dispositivo, así que tiene el suyo. Si llega
+   sin ese dato, el lunes se pierde pidiéndolo — y ya sabemos qué pasa cuando el `pos_id` no
+   corresponde: la llamada cuelga hasta el timeout (§3.13).
+2. **El checklist de cambio de ambiente** de §3.11: credenciales de producción primero, después el
+   estado, y verificar que el token cacheado quedó vacío.
+3. **Cerrar la sesión del POS antes de cambiar el `nave_terminal_id`.** Odoo no deja modificar un
+   método de pago con sesiones abiertas (caso C16). Reemplazar la terminal de test por la de
+   producción exige cierre de caja previo: conviene hacerlo antes de empezar, no a mitad de prueba.
+
+**Aprovechar la ventana hasta el lunes** para dejar cerrado todo lo que no depende de la tarjeta:
+C1 (vocabulario real de estados), C2b (camino feliz por QR) y B3 (que el `transaction_id` guardado
+sea el `payment_id` del pago). Si eso queda verificado antes, el lunes se dedica sólo a lo que
+requiere plástico.
 
 ### 3.14 Terminal vinculada, pero sólo cobra por QR (2026-09-23)
 
