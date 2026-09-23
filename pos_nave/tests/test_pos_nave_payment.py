@@ -433,3 +433,54 @@ class TestPosNavePayment(TransactionCase):
         fields_loaded = self.env['pos.payment.method']._load_pos_data_fields(False)
         self.assertIn('nave_fast_payments', fields_loaded)
         self.assertIn('nave_terminal_id', fields_loaded)
+
+    # ──────────────────────────────────────────────
+    # 10. MENSAJES DE ERROR PARA EL CAJERO
+    # ──────────────────────────────────────────────
+
+    def _http_error(self, status_code, body, json_ok=True):
+        import requests as _requests
+        response = MagicMock(status_code=status_code, text=body)
+        if json_ok:
+            import json as _json
+            response.json.return_value = _json.loads(body)
+        else:
+            response.json.side_effect = ValueError("no es JSON")
+        return _requests.exceptions.HTTPError(response=response)
+
+    def test_22_html_error_page_is_not_shown_to_the_cashier(self):
+        """Un 502 devuelve una página HTML, no JSON. Volcársela al cajero no le sirve de nada."""
+        html = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">' + 'x' * 400
+        msg = self.pos_payment_method._nave_error_message(
+            self._http_error(502, html, json_ok=False)
+        )
+
+        self.assertNotIn('DOCTYPE', msg)
+        self.assertNotIn('<html', msg)
+        self.assertIn('502', msg)
+        self.assertIn('Nave no está respondiendo', msg)
+
+    def test_23_json_error_keeps_the_reason_from_nave(self):
+        """Cuando Nave explica el motivo, se muestra el motivo y no un texto genérico."""
+        body = '{"message": "The payment request could not be deleted.", "detail": "smart_pos"}'
+        msg = self.pos_payment_method._nave_error_message(self._http_error(400, body))
+
+        self.assertIn('could not be deleted', msg)
+        self.assertIn('smart_pos', msg)
+        self.assertIn('400', msg)
+
+    def test_24_hints_are_actionable_per_status(self):
+        """Cada familia de error dice qué hacer, porque quien lo lee está cobrando."""
+        method = self.pos_payment_method
+        self.assertIn('credenciales', method._nave_http_hint(401))
+        self.assertIn('configuración', method._nave_http_hint(404))
+        self.assertIn('encendida', method._nave_http_hint(504))
+        self.assertIn('Reintentá', method._nave_http_hint(503))
+
+    def test_25_connection_error_without_response(self):
+        """Un fallo de red no tiene respuesta HTTP: se usa el texto de la excepción."""
+        import requests as _requests
+        msg = self.pos_payment_method._nave_error_message(
+            _requests.exceptions.ConnectionError("Connection refused")
+        )
+        self.assertIn('Connection refused', msg)

@@ -223,29 +223,66 @@ class PosPaymentMethod(models.Model):
             )
             return default
 
+    def _nave_http_hint(self, status_code):
+        """ Mensaje para el cajero cuando Nave no explica el error.
+
+        Los 5xx y las páginas de error HTML no traen nada aprovechable, y volcarle el cuerpo crudo
+        a alguien que está cobrando sólo lo asusta. Se le dice qué pasó y qué puede hacer.
+        """
+        if status_code in (401, 403):
+            return _(
+                "Nave rechazó las credenciales del comercio (error %s). "
+                "Avisá al administrador: el cobro no se puede hacer hasta que se corrijan.",
+                status_code,
+            )
+        if status_code == 404:
+            return _(
+                "Nave no encontró el punto de venta o el cobro indicado (error %s). "
+                "Verificá la configuración del método de pago.", status_code,
+            )
+        if status_code in (408, 504):
+            return _(
+                "Nave tardó demasiado en responder (error %s). Verificá que la terminal esté "
+                "encendida y con conexión, y reintentá.", status_code,
+            )
+        if status_code >= 500:
+            return _(
+                "Nave no está respondiendo en este momento (error %s). Reintentá en unos segundos "
+                "o cobrá por otro medio.", status_code,
+            )
+        return _("Nave respondió con un error %s.", status_code)
+
     def _nave_error_message(self, exc):
         """ Extrae un mensaje legible de una excepción de `requests` contra la API de Nave. """
-        if getattr(exc, 'response', None) is None:
+        response = getattr(exc, 'response', None)
+        if response is None:
             return str(exc)
+
+        status_code = response.status_code
         try:
-            response_json = exc.response.json()
-            if isinstance(response_json, dict):
-                msg = (
-                    response_json.get('message')
-                    or response_json.get('error')
-                    or response_json.get('description')
-                )
-                detail = response_json.get('detail')
-                if msg and detail:
-                    return f"{msg}: {detail} (HTTP {exc.response.status_code})"
-                if msg:
-                    return f"{msg} (HTTP {exc.response.status_code})"
-        except Exception:
-            pass
-        try:
-            return f"{exc.response.text[:200]} (HTTP {exc.response.status_code})"
-        except Exception:
-            return str(exc)
+            payload = response.json()
+        except ValueError:
+            payload = None
+
+        if isinstance(payload, dict):
+            msg = (
+                payload.get('message')
+                or payload.get('error')
+                or payload.get('description')
+            )
+            detail = payload.get('detail')
+            if msg and detail:
+                return f"{msg}: {detail} (HTTP {status_code})"
+            if msg:
+                return f"{msg} (HTTP {status_code})"
+
+        # Sin JSON aprovechable: se registra el cuerpo crudo para diagnóstico y al cajero se le
+        # muestra algo que pueda accionar.
+        _logger.error(
+            "[pos_nave] Respuesta sin JSON de Nave (HTTP %s): %s",
+            status_code, (response.text or '')[:500],
+        )
+        return self._nave_http_hint(status_code)
 
     def _nave_extract_payment_id(self, intent_data):
         """ Devuelve el `payment_id` del último intento de pago de una intención, o False.
