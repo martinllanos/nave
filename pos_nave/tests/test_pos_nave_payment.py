@@ -411,3 +411,25 @@ class TestPosNavePayment(TransactionCase):
             mock_delete.call_args[0][0],
             'https://e3-api.ranty.io/api/payment_requests/intent-1234',
         )
+
+    # ──────────────────────────────────────────────
+    # 9. COBRO INMEDIATO vs COBRO DIVIDIDO
+    # ──────────────────────────────────────────────
+
+    def test_20_fast_payments_defaults_to_on(self):
+        """Por defecto el cobro se dispara al seleccionar el método, que es el comportamiento
+        previo y el más rápido para una venta común."""
+        self.assertTrue(self.pos_payment_method.nave_fast_payments)
+
+    def test_21_fast_payments_is_configurable_and_reaches_the_pos(self):
+        """Se puede desactivar por método de pago, y el campo baja al frontend.
+
+        Sin que viaje en los datos del POS, el cliente JS no puede leerlo y el ajuste no tendría
+        ningún efecto.
+        """
+        self.pos_payment_method.nave_fast_payments = False
+        self.assertFalse(self.pos_payment_method.nave_fast_payments)
+
+        fields_loaded = self.env['pos.payment.method']._load_pos_data_fields(False)
+        self.assertIn('nave_fast_payments', fields_loaded)
+        self.assertIn('nave_terminal_id', fields_loaded)

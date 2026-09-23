@@ -48,6 +48,15 @@ export class PaymentNave extends PaymentInterface {
     }
 
     /**
+     * Si es true, el cobro se dispara apenas el cajero toca el método de pago, con el saldo
+     * completo. Si es false, primero puede escribir el importe: es lo que hace falta para un
+     * cobro dividido. Se configura por método de pago (`nave_fast_payments`).
+     */
+    get fast_payments() {
+        return this.payment_method_id.nave_fast_payments ?? true;
+    }
+
+    /**
      * Inicia el flujo de cobro enviando la intención de pago a Nave.
      */
     async send_payment_request(uuid) {

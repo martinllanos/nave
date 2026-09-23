@@ -41,11 +41,20 @@ class PosPaymentMethod(models.Model):
         copy=False
     )
 
+    nave_fast_payments = fields.Boolean(
+        string='Enviar el total al seleccionar',
+        default=True,
+        help='Activo: al tocar el método de pago se envía el saldo completo a la terminal, sin '
+             'pasar por el teclado numérico. Es lo más rápido para el cajero en una venta común.\n'
+             'Desactivalo si necesitás cobros divididos: así el cajero escribe primero cuánto va '
+             'por este medio (por ejemplo $500 con tarjeta) y recién ahí se envía a la terminal.',
+    )
+
     @api.model
     def _load_pos_data_fields(self, config_id):
         """Carga los campos necesarios en el frontend (JS/OWL)."""
         params = super()._load_pos_data_fields(config_id)
-        params += ['nave_terminal_id']
+        params += ['nave_terminal_id', 'nave_fast_payments']
         return params
 
     def _nave_payment_type(self):

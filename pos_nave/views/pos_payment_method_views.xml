@@ -10,6 +10,8 @@
                 <field name="nave_terminal_id"
                        invisible="use_payment_terminal not in ('nave', 'nave_qr')"
                        required="use_payment_terminal in ('nave', 'nave_qr')"/>
+                <field name="nave_fast_payments"
+                       invisible="use_payment_terminal not in ('nave', 'nave_qr')"/>
             </xpath>
         </field>
     </record>
