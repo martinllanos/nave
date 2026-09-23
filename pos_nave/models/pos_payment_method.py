@@ -201,6 +201,22 @@ class PosPaymentMethod(models.Model):
                     data['nave_payment'] = payment
             return data
         except requests.exceptions.RequestException as e:
+            # Nave responde 400 `payment_request_is_disabled` cuando la intención fue dada de baja,
+            # por ejemplo porque no pudo notificar a la terminal y la deshabilitó sola
+            # (`disabled_by_user_timeout`). Eso no es un fallo de la consulta: es el desenlace del
+            # cobro. Se traduce al vocabulario de estados para que el POS lo cierre como
+            # corresponde en vez de mostrar un error técnico.
+            if self._nave_error_code(e) == 'payment_request_is_disabled':
+                _logger.info(
+                    "[pos_nave] La intención %s fue dada de baja en Nave.", intent_id
+                )
+                return {
+                    'id': intent_id,
+                    'status': {
+                        'name': 'DISABLED',
+                        'reason_code': 'payment_request_is_disabled',
+                    },
+                }
             _logger.error("[pos_nave] Error consultando estado en Nave: %s", e)
             return {'error': True, 'message': self._nave_error_message(e)}
 
@@ -251,6 +267,17 @@ class PosPaymentMethod(models.Model):
                 "o cobrá por otro medio.", status_code,
             )
         return _("Nave respondió con un error %s.", status_code)
+
+    def _nave_error_code(self, exc):
+        """ Código de error que devuelve Nave en el cuerpo, o False si no lo trae. """
+        response = getattr(exc, 'response', None)
+        if response is None:
+            return False
+        try:
+            payload = response.json()
+        except ValueError:
+            return False
+        return payload.get('code') if isinstance(payload, dict) else False
 
     def _nave_error_message(self, exc):
         """ Extrae un mensaje legible de una excepción de `requests` contra la API de Nave. """

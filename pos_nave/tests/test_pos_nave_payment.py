@@ -484,3 +484,48 @@ class TestPosNavePayment(TransactionCase):
             _requests.exceptions.ConnectionError("Connection refused")
         )
         self.assertIn('Connection refused', msg)
+
+    @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.get')
+    def test_26_disabled_intent_is_a_state_not_an_error(self, mock_get):
+        """Una intención dada de baja cierra el cobro, no rompe la consulta.
+
+        Nave responde 400 `payment_request_is_disabled` cuando la dio de baja, por ejemplo porque
+        no pudo notificar a la terminal. Tratarlo como fallo técnico dejaría al cajero con un
+        error críptico en vez de "el cobro fue dado de baja".
+        """
+        mock_get.side_effect = self._http_error(
+            400, '{"code": "payment_request_is_disabled", "message": "Payment request is disabled"}'
+        )
+
+        res = self.pos_payment_method.nave_check_payment_status(
+            self.pos_payment_method.id, intent_id='intent-off'
+        )
+
+        self.assertNotIn('error', res, "No es un error de consulta sino el desenlace del cobro")
+        self.assertEqual(res['status']['name'], 'DISABLED')
+        self.assertEqual(res['status']['reason_code'], 'payment_request_is_disabled')
+
+    @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.get')
+    def test_27_other_400s_are_still_errors(self, mock_get):
+        """Sólo la baja se traduce a estado: el resto sigue siendo error."""
+        mock_get.side_effect = self._http_error(
+            400, '{"code": "not_found", "message": "Payment request not found"}'
+        )
+
+        res = self.pos_payment_method.nave_check_payment_status(
+            self.pos_payment_method.id, intent_id='intent-x'
+        )
+
+        self.assertTrue(res.get('error'))
+        self.assertIn('not found', res.get('message', ''))
+
+    def test_28_error_code_extraction(self):
+        """El código se lee del cuerpo, y una respuesta sin JSON no rompe nada."""
+        method = self.pos_payment_method
+        self.assertEqual(
+            method._nave_error_code(self._http_error(400, '{"code": "invalid_pos"}')),
+            'invalid_pos',
+        )
+        self.assertFalse(method._nave_error_code(self._http_error(502, '<html>', json_ok=False)))
+        import requests as _requests
+        self.assertFalse(method._nave_error_code(_requests.exceptions.ConnectionError("x")))
