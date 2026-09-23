@@ -415,6 +415,41 @@ Nota colateral: esta duplicación es también la razón por la que `test_05_miss
 (`pos_nave/tests/test_pos_nave_payment.py:140-150`) no levanta el `UserError` que espera — el
 fallback a `nave_pos_id` lo enmascara.
 
+### 3.12 Primer cobro real contra la terminal (2026-09-23)
+
+Se lanzó un cobro de $ 1.925,45 desde el POS con el código nuevo desplegado. Resultado:
+
+```
+Error al solicitar cobro
+HTTPSConnectionPool(host='e3-api.ranty.io', port=443): Read timed out. (read timeout=10)
+```
+
+**Lo que confirma:**
+
+- El host es **`e3-api.ranty.io`**: el fix de N2 está efectivamente corriendo.
+- **B11 y B4 verificados en un cobro real**: el POS cortó, mostró el diálogo y dejó la línea en
+  "Volver a intentar". Con el código anterior habría sido un spinner infinito cuya única salida era
+  "Force done".
+
+**No es un problema de red.** Medido desde adentro del contenedor de Odoo:
+
+| Host | Respuesta |
+|---|---|
+| `e3-api.ranty.io` | 403 en 0,30 s |
+| `api-sandbox.ranty.io` | 403 en 0,27 s |
+| `api.ranty.io` | 403 en 0,23 s |
+
+Los tres resuelven a las mismas IPs de Cloudflare. **El commit `ffb524b` esquivaba un host que
+siempre estuvo sano.**
+
+**Causa probable**: crear una intención `smart_pos` obliga a Nave a alcanzar la terminal física
+antes de contestar, y la terminal **todavía no está vinculada** (§3.10). El timeout se subió a 30 s
+(`65feb6e`), lo que ordena el comportamiento para un equipo lento en 4G, pero **no destraba el bloque
+C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a fallar igual.
+
+Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
+hay que reportárselo a Nave con esta evidencia.
+
 ### 3.11 Modo acordado: producción acotada (2026-09-22)
 
 **Decisión**: se homologa sobre `www.onlyone.ar` con **cobros reales de importe acotado**, en lugar
