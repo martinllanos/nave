@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+
+    <!--
+        Red de seguridad para los webhooks perdidos.
+
+        Nave reintenta la notificación cinco veces a lo largo de unas 7h45m y después se rinde. Si
+        el sitio estuvo caído más que eso, o el webhook nunca llegó, la transacción queda pendiente
+        para siempre y la venta no se concilia. Este cron vuelve a consultar esas transacciones
+        contra la API.
+    -->
+    <record id="cron_nave_poll_pending_transactions" model="ir.cron">
+        <field name="name">Nave: conciliar transacciones pendientes</field>
+        <field name="model_id" ref="payment.model_payment_transaction"/>
+        <field name="state">code</field>
+        <field name="code">model._cron_nave_poll_pending_transactions()</field>
+        <field name="user_id" ref="base.user_root"/>
+        <field name="interval_number">15</field>
+        <field name="interval_type">minutes</field>
+        <field name="active" eval="True"/>
+    </record>
+
+</odoo>

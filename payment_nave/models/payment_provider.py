@@ -9,6 +9,23 @@ from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
 
+# Nave Point (payment_type 'smart_pos') se sirve desde un host de sandbox distinto del resto de los
+# flujos. En producción todos comparten el mismo. Ver tasks/doc_actualizada_2026-09-22.md §3.
+NAVE_SANDBOX_API_URLS = {
+    'smart_pos': 'https://e3-api.ranty.io',
+}
+NAVE_SANDBOX_API_URL = 'https://api-sandbox.ranty.io'
+NAVE_PRODUCTION_API_URL = 'https://api.ranty.io'
+
+# Único dominio al que se le permite a un webhook redirigirnos. El payload de Nave no viene
+# firmado, así que la `payment_check_url` que trae es dato no confiable: sin esta restricción,
+# cualquiera que adivine una referencia puede apuntar la verificación a un host propio.
+NAVE_TRUSTED_DOMAIN = 'ranty.io'
+
+# Métodos de pago que el proveedor activa al pasar a Prueba o Producción. Sin esto Odoo no activa
+# ninguno y los métodos de Nave quedan archivados, o sea invisibles en el checkout.
+NAVE_DEFAULT_PAYMENT_METHOD_CODES = {'card', 'naranja', 'nave_qr'}
+
 
 class PaymentProvider(models.Model):
     _inherit = 'payment.provider'
@@ -96,10 +113,10 @@ class PaymentProvider(models.Model):
                     response_json = e.response.json()
                     if isinstance(response_json, dict):
                         msg = (
-                            response_json.get('message') or 
-                            response_json.get('error') or 
-                            response_json.get('description') or
-                            response_json.get('error_description')
+                            response_json.get('message')
+                            or response_json.get('error')
+                            or response_json.get('description')
+                            or response_json.get('error_description')
                         )
                         if msg:
                             error_details = f"{msg} (HTTP {e.response.status_code})"
@@ -128,6 +145,42 @@ class PaymentProvider(models.Model):
 
         return access_token
 
+    def write(self, vals):
+        """ Invalida el token cacheado cuando cambia el ambiente o las credenciales.
+
+        El token se guarda en el propio proveedor y sólo se renueva por vencimiento (hasta 24 h).
+        Al pasar de Prueba a Producción, o al reemplazar las credenciales, el token viejo sigue
+        siendo válido en el tiempo pero pertenece al otro ambiente: sin esto, el módulo mandaría
+        un token de sandbox a la API de producción hasta que expire, y todas las llamadas
+        fallarían con 401 sin que nada las reintente.
+        """
+        res = super().write(vals)
+        if not {'state', 'nave_client_id', 'nave_client_secret'} & set(vals):
+            return res
+        stale = self.filtered(lambda p: p.code == 'nave' and p.nave_access_token)
+        if stale:
+            _logger.info(
+                "[payment_nave] Se invalida el token cacheado de %s proveedor(es) "
+                "por cambio de ambiente o credenciales.", len(stale)
+            )
+            super(PaymentProvider, stale).write({
+                'nave_access_token': False,
+                'nave_token_expiry': False,
+            })
+        return res
+
+    def _get_default_payment_method_codes(self):
+        """ Métodos que se activan solos al habilitar el proveedor.
+
+        Odoo los archiva por defecto y sólo activa los que devuelve este método
+        (`_activate_default_pms`). Sin sobreescribirlo, el proveedor quedaba habilitado pero sin
+        un solo método visible en el checkout.
+        """
+        default_codes = super()._get_default_payment_method_codes()
+        if self.code != 'nave':
+            return default_codes
+        return NAVE_DEFAULT_PAYMENT_METHOD_CODES
+
     def _nave_get_auth_url(self):
         """ Retorna el endpoint de autenticación según el estado del proveedor (Prueba o Producción). """
         self.ensure_one()
@@ -135,9 +188,14 @@ class PaymentProvider(models.Model):
             return 'https://homoservices.apinaranja.com/security-ms/api/security/auth0/b2b/m2msPrivate'
         return 'https://services.apinaranja.com/security-ms/api/security/auth0/b2b/m2msPrivate'
 
-    def _nave_get_api_url(self):
-        """ Retorna la URL base de la API según el estado del proveedor (Prueba o Producción). """
+    def _nave_get_api_url(self, payment_type=None):
+        """ Retorna la URL base de la API según el estado del proveedor y el tipo de pago.
+
+        :param str payment_type: tipo de pago de Nave ('smart_pos', 'static_qr', 'payment_link',
+            'ecommerce'). Sólo 'smart_pos' usa un host de sandbox propio; el resto comparte
+            api-sandbox. En producción el host es el mismo para todos.
+        """
         self.ensure_one()
         if self.state == 'test':
-            return 'https://api-sandbox.ranty.io'
-        return 'https://api.ranty.io'
+            return NAVE_SANDBOX_API_URLS.get(payment_type, NAVE_SANDBOX_API_URL)
+        return NAVE_PRODUCTION_API_URL

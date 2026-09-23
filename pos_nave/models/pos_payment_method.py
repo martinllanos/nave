@@ -12,11 +12,17 @@ class PosPaymentMethod(models.Model):
     _inherit = 'pos.payment.method'
 
     def _get_payment_terminal_selection(self):
-        return super()._get_payment_terminal_selection() + [('nave', 'Nave')]
+        return super()._get_payment_terminal_selection() + [
+            ('nave', 'Nave Point'),
+            ('nave_qr', 'Nave QR'),
+        ]
 
     nave_terminal_id = fields.Char(
-        string='ID de Terminal Nave',
-        help='El identificador único de la terminal física de Nave (Device ID / Terminal ID).',
+        string='ID del punto de venta en Nave',
+        help='El pos_id que Nave asigna al dispositivo: la terminal Nave Point o el QR físico. '
+             'Se descarga desde Nave > Integraciones > Sistema de gestión. '
+             'Cada dispositivo tiene el suyo y está atado a un tipo de pago: usar el de otro tipo '
+             'hace que la API responda INVALID_POS.',
         copy=False
     )
 
@@ -26,6 +32,14 @@ class PosPaymentMethod(models.Model):
         params = super()._load_pos_data_fields(config_id)
         params += ['nave_terminal_id']
         return params
+
+    def _nave_payment_type(self):
+        """ Tipo de pago de Nave según la terminal configurada.
+
+        Cada tipo tiene su endpoint, su host de sandbox y su propio pos_id.
+        """
+        self.ensure_one()
+        return 'static_qr' if self.use_payment_terminal == 'nave_qr' else 'smart_pos'
 
     def _get_nave_payment_provider(self):
         """Helper para obtener el proveedor de Nave activo de la compañía actual."""
@@ -54,10 +68,11 @@ class PosPaymentMethod(models.Model):
         payment_method = self.browse(payment_method_id)
 
         provider = payment_method._get_nave_payment_provider()
+        payment_type = payment_method._nave_payment_type()
         token = provider._nave_get_access_token()
-        base_url = provider._nave_get_api_url()
+        base_url = provider._nave_get_api_url(payment_type)
 
-        api_url = f"{base_url}/api/payment_request/smart_pos"
+        api_url = f"{base_url}/api/payment_request/{payment_type}"
         formatted_amount = f"{amount:.2f}"
 
         # El ID de la terminal (device_id) se envía en seller.pos_id, usando la terminal del método o el POS ID global
@@ -93,6 +108,10 @@ class PosPaymentMethod(models.Model):
             'duration_time': 300
         }
 
+        if payment_type == 'static_qr':
+            # Obligatorio para QR: indica que el monto viene cerrado y el cliente no lo edita.
+            payload['transactions'][0]['qr_amount'] = 'close'
+
         headers = {
             'Authorization': f"Bearer {token}",
             'Content-Type': 'application/json',
@@ -108,41 +127,27 @@ class PosPaymentMethod(models.Model):
             return data
         except requests.exceptions.RequestException as e:
             _logger.error("[pos_nave] Error enviando pago a la terminal Nave: %s", e)
-            error_details = str(e)
-            if hasattr(e, 'response') and e.response is not None:
-                try:
-                    response_json = e.response.json()
-                    if isinstance(response_json, dict):
-                        msg = (
-                            response_json.get('message') or 
-                            response_json.get('error') or 
-                            response_json.get('description')
-                        )
-                        validation_errors = response_json.get('errors') or response_json.get('validation_errors')
-                        if msg:
-                            error_details = f"{msg} (HTTP {e.response.status_code})"
-                        if validation_errors:
-                            error_details += f" - Detalle: {validation_errors}"
-                except Exception:
-                    try:
-                        error_details = f"{e.response.text[:200]} (HTTP {e.response.status_code})"
-                    except Exception:
-                        pass
-            return {'error': True, 'message': error_details}
+            return {'error': True, 'message': self._nave_error_message(e)}
 
     @api.model
     def nave_check_payment_status(self, payment_method_id, intent_id):
         """
         Llamada desde el JS del POS (Polling) para consultar el estado de la intención de pago Smart POS.
         Endpoint: GET /api/payment_requests/{payment_request_id}
+
+        OJO: este endpoint devuelve el estado de la INTENCIÓN (PENDING, PROCESSED,
+        SUCCESS_PROCESSED, FAILURE_PROCESSED, DISABLED, EXPIRED, BLOCKED), que NO es el mismo
+        vocabulario que el del PAGO (APPROVED, REJECTED, ...) que devuelve
+        GET /ranty-payments/payments/{payment_id}. El mapeo vive en el JS (NAVE_STATUS).
         """
         if not self.env.user.has_group('point_of_sale.group_pos_user'):
             raise AccessError(_("No tienes permisos para consultar solicitudes a Nave."))
 
         payment_method = self.browse(payment_method_id)
         provider = payment_method._get_nave_payment_provider()
+        payment_type = payment_method._nave_payment_type()
         token = provider._nave_get_access_token()
-        base_url = provider._nave_get_api_url()
+        base_url = provider._nave_get_api_url(payment_type)
 
         api_url = f"{base_url}/api/payment_requests/{intent_id}"
 
@@ -155,27 +160,85 @@ class PosPaymentMethod(models.Model):
             response = requests.get(api_url, headers=headers, timeout=5)
             response.raise_for_status()
             data = response.json()
+            _logger.debug("[pos_nave] Estado de intención %s: %s", intent_id, data)
+
+            # La intención expone el pago asociado en payment_attempts. Lo adjuntamos para que el
+            # POS pueda guardar el payment_id correcto e imprimir los datos de la tarjeta sin
+            # tener que hacer otra vuelta al servidor.
+            payment_id = self._nave_extract_payment_id(data)
+            if payment_id:
+                data['nave_payment_id'] = payment_id
+                payment = self._nave_fetch_payment(provider, payment_id, payment_type)
+                if payment:
+                    data['nave_payment'] = payment
             return data
         except requests.exceptions.RequestException as e:
             _logger.error("[pos_nave] Error consultando estado en Nave: %s", e)
-            error_details = str(e)
-            if hasattr(e, 'response') and e.response is not None:
-                try:
-                    response_json = e.response.json()
-                    if isinstance(response_json, dict):
-                        msg = (
-                            response_json.get('message') or 
-                            response_json.get('error') or 
-                            response_json.get('description')
-                        )
-                        if msg:
-                            error_details = f"{msg} (HTTP {e.response.status_code})"
-                except Exception:
-                    try:
-                        error_details = f"{e.response.text[:200]} (HTTP {e.response.status_code})"
-                    except Exception:
-                        pass
-            return {'error': True, 'message': error_details}
+            return {'error': True, 'message': self._nave_error_message(e)}
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Helpers internos
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _nave_error_message(self, exc):
+        """ Extrae un mensaje legible de una excepción de `requests` contra la API de Nave. """
+        if getattr(exc, 'response', None) is None:
+            return str(exc)
+        try:
+            response_json = exc.response.json()
+            if isinstance(response_json, dict):
+                msg = (
+                    response_json.get('message')
+                    or response_json.get('error')
+                    or response_json.get('description')
+                )
+                detail = response_json.get('detail')
+                if msg and detail:
+                    return f"{msg}: {detail} (HTTP {exc.response.status_code})"
+                if msg:
+                    return f"{msg} (HTTP {exc.response.status_code})"
+        except Exception:
+            pass
+        try:
+            return f"{exc.response.text[:200]} (HTTP {exc.response.status_code})"
+        except Exception:
+            return str(exc)
+
+    def _nave_extract_payment_id(self, intent_data):
+        """ Devuelve el `payment_id` del último intento de pago de una intención, o False.
+
+        La intención expone los pagos asociados en `payment_attempts.payments`. Ese `payment_id` es
+        el que identifica al pago propiamente dicho: es el que hay que usar para consultar
+        `/ranty-payments/payments/{id}` y el que espera el endpoint de devolución. El `id` de la
+        intención NO sirve para eso.
+        """
+        attempts = (intent_data or {}).get('payment_attempts') or {}
+        payments = attempts.get('payments') or []
+        if not payments:
+            return False
+        return payments[-1].get('payment_id') or False
+
+    def _nave_fetch_payment(self, provider, payment_id, payment_type):
+        """ GET /ranty-payments/payments/{payment_id}. Devuelve el pago o False si no se pudo. """
+        token = provider._nave_get_access_token()
+        base_url = provider._nave_get_api_url(payment_type)
+        api_url = f"{base_url}/ranty-payments/payments/{payment_id}"
+        headers = {
+            'Authorization': f"Bearer {token}",
+            'Accept': 'application/json',
+        }
+        try:
+            response = requests.get(api_url, headers=headers, timeout=5)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            # No es fatal: la intención ya nos dijo que el cobro salió bien. Sin estos datos el
+            # ticket sale sin marca ni últimos 4, pero la venta se cierra igual.
+            _logger.warning(
+                "[pos_nave] No se pudieron recuperar los datos del pago %s: %s",
+                payment_id, self._nave_error_message(e),
+            )
+            return False
 
     @api.model
     def nave_cancel_payment_intent(self, payment_method_id, intent_id):
@@ -188,8 +251,9 @@ class PosPaymentMethod(models.Model):
 
         payment_method = self.browse(payment_method_id)
         provider = payment_method._get_nave_payment_provider()
+        payment_type = payment_method._nave_payment_type()
         token = provider._nave_get_access_token()
-        base_url = provider._nave_get_api_url()
+        base_url = provider._nave_get_api_url(payment_type)
 
         api_url = f"{base_url}/api/payment_requests/{intent_id}"
 
@@ -199,6 +263,9 @@ class PosPaymentMethod(models.Model):
             'Accept': 'application/json',
         }
 
+        # 'disabled_from_saas' es el código correcto según el catálogo de bajas de Nave
+        # ("Cancelación desde el SAAS por motivo externo"): la baja la origina Odoo, no la terminal.
+        # No confundir con 'manual_disabled_by_user', que es la baja hecha DENTRO de la terminal.
         payload = {
             'reason': {
                 'code': 'disabled_from_saas',
@@ -225,8 +292,9 @@ class PosPaymentMethod(models.Model):
 
         payment_method = self.browse(payment_method_id)
         provider = payment_method._get_nave_payment_provider()
+        payment_type = payment_method._nave_payment_type()
         token = provider._nave_get_access_token()
-        base_url = provider._nave_get_api_url()
+        base_url = provider._nave_get_api_url(payment_type)
 
         api_url = f"{base_url}/api/payments/{transaction_id}"
 
@@ -243,4 +311,3 @@ class PosPaymentMethod(models.Model):
         except requests.exceptions.RequestException as e:
             _logger.error("[pos_nave] Error solicitando reembolso en Nave: %s", e)
             return {'error': True, 'message': str(e)}
-

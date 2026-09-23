@@ -1,3 +1,5 @@
+> ⚠️ **SUPERSEDIDO (2026-09-22)** — copia anterior a la documentación vigente. Ver `tasks/doc_actualizada_2026-09-22.md` y las URLs del DevPortal de Nave.
+
 # Integración de Cobros Presenciales con Nave Point (Smart POS)
 
 Integrá Nave Point en tu comercio y habilitá pagos presenciales con nuestra terminal. Aceptá tarjetas con chip, contactless, NFC y QR. Gestioná múltiples terminales desde un solo lugar.

@@ -1,3 +1,5 @@
+> ⚠️ **SUPERSEDIDO (2026-09-22)** — copia anterior a la documentación vigente. Ver `tasks/doc_actualizada_2026-09-22.md` y las URLs del DevPortal de Nave.
+
 # QR Interoperable - Cobros Presenciales con QR Físico vía API
 
 Integrá nuestra solución de cobros vía API y permití pagos con QR desde tu negocio de forma simple y segura. Los clientes podrán escanear y pagar usando cualquier billetera virtual o aplicación bancaria.

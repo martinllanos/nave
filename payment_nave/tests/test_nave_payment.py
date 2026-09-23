@@ -3,8 +3,12 @@
 # Cubre: autenticación (caché de token), creación de intención de pago,
 # procesamiento de webhooks, reembolsos y el wizard de link de pago.
 
+from datetime import timedelta
 from unittest.mock import patch, MagicMock
 
+import requests
+
+from odoo import Command, fields
 from odoo.tests import tagged
 from odoo.addons.payment.tests.common import PaymentCommon
 
@@ -21,6 +25,10 @@ class TestNaveProvider(PaymentCommon):
     def setUpClass(cls):
         super().setUpClass()
 
+        # El proveedor real queda vinculado a sus métodos de pago por el XML del módulo; el de
+        # los tests se crea a mano, así que hay que asociarlos igual o el wizard no puede armar
+        # la transacción (payment_method_id es obligatorio).
+        cls.nave_qr_method = cls.env.ref('payment_nave.payment_method_nave_qr')
         cls.nave_provider = cls.env['payment.provider'].create({
             'name': 'Nave Test',
             'code': 'nave',
@@ -29,6 +37,7 @@ class TestNaveProvider(PaymentCommon):
             'nave_client_id': 'test_client_id_12345',
             'nave_client_secret': 'test_client_secret_xyz',
             'nave_pos_id': 'pos-test-uuid-001',
+            'payment_method_ids': [Command.set([cls.nave_qr_method.id])],
         })
 
         cls.currency_ars = cls.env.ref('base.ARS')
@@ -291,6 +300,20 @@ class TestNaveProvider(PaymentCommon):
         self.assertIn('payment_link', call_url,
                       "El wizard debe usar el endpoint /payment_link, no /ecommerce")
 
+        # El link debe quedar respaldado por una transacción, o el webhook no lo encuentra.
+        tx = self.env['payment.transaction'].search([
+            ('provider_id', '=', self.nave_provider.id),
+            ('nave_payment_request_id', '=', 'pr-link-001'),
+        ])
+        self.assertEqual(len(tx), 1, "El wizard debe crear exactamente una transacción")
+        self.assertEqual(tx.state, 'pending')
+        self.assertEqual(tx.amount, 2500.00)
+        self.assertEqual(tx.nave_checkout_url, 'https://checkout.ranty.io/link/pr-link-001')
+
+        # La referencia enviada a Nave y la de la transacción tienen que ser idénticas.
+        payload = mock_post.call_args[1]['json']
+        self.assertEqual(payload['external_payment_id'], tx.reference)
+
     def test_09_link_wizard_amount_validation(self):
         """Verifica que el wizard rechaza montos menores o iguales a 0."""
         wizard = self.env['nave.payment.link.wizard'].create({
@@ -318,3 +341,399 @@ class TestNaveProvider(PaymentCommon):
         formatted_value = products[0]['unit_price']['value']
         self.assertEqual(formatted_value, '999.50',
                          "El monto debe tener exactamente 2 decimales en formato string")
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    @patch('odoo.addons.payment_nave.models.nave_link_wizard.requests.post')
+    def test_11_link_wizard_webhook_reconciles(self, mock_post, mock_get):
+        """El webhook del pago de un link encuentra su transacción y la concilia.
+
+        Es el circuito completo que antes se cortaba: el wizard no creaba transacción, el webhook
+        no la encontraba, el controller devolvía 500 y la factura quedaba impaga para siempre.
+        """
+        mock_post.return_value = MagicMock(
+            json=MagicMock(return_value={
+                'id': 'pr-link-011',
+                'checkout_url': 'https://checkout.ranty.io/link/pr-link-011',
+            }),
+            raise_for_status=MagicMock(return_value=None),
+        )
+        mock_get.return_value = MagicMock(
+            json=MagicMock(return_value={
+                'id': 'pay-link-011',
+                'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
+                'wallet': {'name': 'modo'},
+            }),
+            raise_for_status=MagicMock(return_value=None),
+        )
+        self.nave_provider.write({
+            'nave_access_token': 'tok_test',
+            'nave_token_expiry': self.env['payment.provider']._fields['nave_token_expiry'].from_string('2099-01-01 00:00:00'),
+        })
+
+        wizard = self.env['nave.payment.link.wizard'].create({
+            'provider_id': self.nave_provider.id,
+            'company_id': self.env.company.id,
+            'partner_id': self.partner.id,
+            'amount': 3300.00,
+            'currency_id': self.currency_ars.id,
+            'external_reference': 'INV-2026-0011',
+        })
+        wizard.action_generate_link()
+
+        # Nave notifica con el external_payment_id que le mandamos.
+        external_payment_id = mock_post.call_args[1]['json']['external_payment_id']
+        tx = self.env['payment.transaction']._get_tx_from_notification_data(
+            'nave', {'external_payment_id': external_payment_id, 'payment_id': 'pay-link-011'}
+        )
+
+        self.assertTrue(tx, "El webhook debe poder encontrar la transacción del link")
+        tx._process_notification_data({
+            'external_payment_id': external_payment_id,
+            'payment_id': 'pay-link-011',
+        })
+        self.assertEqual(tx.state, 'done')
+        self.assertEqual(tx.nave_payment_id, 'pay-link-011')
+
+    @patch('odoo.addons.payment_nave.models.nave_link_wizard.requests.post')
+    def test_12_link_wizard_reference_is_unique(self, mock_post):
+        """Dos links con la misma referencia externa producen transacciones distintas."""
+        mock_post.return_value = MagicMock(
+            json=MagicMock(return_value={
+                'id': 'pr-link-012',
+                'checkout_url': 'https://checkout.ranty.io/link/pr-link-012',
+            }),
+            raise_for_status=MagicMock(return_value=None),
+        )
+        self.nave_provider.write({
+            'nave_access_token': 'tok_test',
+            'nave_token_expiry': self.env['payment.provider']._fields['nave_token_expiry'].from_string('2099-01-01 00:00:00'),
+        })
+
+        references = []
+        for _i in range(2):
+            wizard = self.env['nave.payment.link.wizard'].create({
+                'provider_id': self.nave_provider.id,
+                'company_id': self.env.company.id,
+                'partner_id': self.partner.id,
+                'amount': 1000.00,
+                'currency_id': self.currency_ars.id,
+                'external_reference': 'INV-2026-0012',
+            })
+            wizard.action_generate_link()
+            references.append(mock_post.call_args[1]['json']['external_payment_id'])
+
+        self.assertEqual(references[0], 'INV-2026-0012')
+        self.assertNotEqual(references[0], references[1],
+                            "Regenerar el link no puede reusar el mismo external_payment_id")
+
+    def test_13_link_wizard_rejects_long_reference(self):
+        """Una referencia que excede el tope de Nave se rechaza en vez de truncarse.
+
+        Truncar rompería la conciliación: el webhook llega con el id truncado y la búsqueda por
+        referencia completa no lo encuentra.
+        """
+        from odoo.exceptions import UserError
+        wizard = self.env['nave.payment.link.wizard'].create({
+            'provider_id': self.nave_provider.id,
+            'company_id': self.env.company.id,
+            'partner_id': self.partner.id,
+            'amount': 1000.00,
+            'currency_id': self.currency_ars.id,
+            'external_reference': 'X' * 40,
+        })
+        with self.assertRaises(UserError):
+            wizard.action_generate_link()
+
+    # ──────────────────────────────────────────────
+    # 6. SEGURIDAD DEL WEBHOOK
+    # ──────────────────────────────────────────────
+
+    def _nave_make_tx(self, reference):
+        return self.env['payment.transaction'].create({
+            'provider_id': self.nave_provider.id,
+            'payment_method_id': self.payment_method_id,
+            'amount': 1500.00,
+            'currency_id': self.currency_ars.id,
+            'reference': reference,
+            'partner_id': self.partner.id,
+            'operation': 'online_redirect',
+        })
+
+    def _nave_arm_token(self):
+        self.nave_provider.write({
+            'nave_access_token': 'tok_test',
+            'nave_token_expiry': self.env['payment.provider']._fields['nave_token_expiry'].from_string('2099-01-01 00:00:00'),
+        })
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_14_webhook_check_url_outside_nave_is_ignored(self, mock_get):
+        """Una payment_check_url de otro dominio no se consulta: el webhook no viene firmado.
+
+        Sin esta restricción, quien adivine una referencia puede apuntar la verificación a un
+        servidor propio que responda APPROVED y dar por pagada una factura ajena.
+        """
+        mock_get.return_value = MagicMock(
+            json=MagicMock(return_value={'id': 'pay-evil', 'status': {'name': 'APPROVED'}}),
+            raise_for_status=MagicMock(return_value=None),
+        )
+        self._nave_arm_token()
+        tx = self._nave_make_tx('TEST-NAVE-SSRF-001')
+
+        tx._process_notification_data({
+            'payment_id': 'pay-evil',
+            'external_payment_id': 'TEST-NAVE-SSRF-001',
+            'payment_check_url': 'https://atacante.example.com/ranty-payments/payments/pay-evil',
+        })
+
+        called_url = mock_get.call_args[0][0]
+        self.assertNotIn('atacante.example.com', called_url,
+                         "Nunca se debe consultar un host ajeno a Nave")
+        self.assertEqual(
+            called_url,
+            'https://api-sandbox.ranty.io/ranty-payments/payments/pay-evil',
+            "Debe caer al fallback construido localmente",
+        )
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_15_webhook_check_url_lookalike_is_ignored(self, mock_get):
+        """Un dominio que sólo se parece al de Nave tampoco se acepta."""
+        mock_get.return_value = MagicMock(
+            json=MagicMock(return_value={'id': 'pay-x', 'status': {'name': 'APPROVED'}}),
+            raise_for_status=MagicMock(return_value=None),
+        )
+        self._nave_arm_token()
+        tx = self._nave_make_tx('TEST-NAVE-SSRF-002')
+
+        tx._process_notification_data({
+            'payment_id': 'pay-x',
+            'external_payment_id': 'TEST-NAVE-SSRF-002',
+            'payment_check_url': 'https://ranty.io.atacante.example.com/payments/pay-x',
+        })
+
+        self.assertNotIn('atacante', mock_get.call_args[0][0])
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_16_webhook_check_url_from_nave_is_used(self, mock_get):
+        """La URL legítima de Nave sí se usa, y se normaliza a https.
+
+        Nave la documenta sin esquema; es además la que destrabó el checkout, porque el host que
+        construimos localmente no siempre es el que corresponde.
+        """
+        mock_get.return_value = MagicMock(
+            json=MagicMock(return_value={
+                'id': 'pay-ok',
+                'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
+                'wallet': {'name': 'modo'},
+            }),
+            raise_for_status=MagicMock(return_value=None),
+        )
+        self._nave_arm_token()
+        tx = self._nave_make_tx('TEST-NAVE-SSRF-003')
+
+        tx._process_notification_data({
+            'payment_id': 'pay-ok',
+            'external_payment_id': 'TEST-NAVE-SSRF-003',
+            'payment_check_url': 'api-sandbox.ranty.io/ranty-payments/payments/pay-ok',
+        })
+
+        self.assertEqual(
+            mock_get.call_args[0][0],
+            'https://api-sandbox.ranty.io/ranty-payments/payments/pay-ok',
+        )
+        self.assertEqual(tx.state, 'done')
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_17_webhook_check_url_drops_userinfo(self, mock_get):
+        """Se descarta el userinfo de la URL, que sólo sirve para confundir al que lee el log."""
+        mock_get.return_value = MagicMock(
+            json=MagicMock(return_value={'id': 'pay-u', 'status': {'name': 'APPROVED'}}),
+            raise_for_status=MagicMock(return_value=None),
+        )
+        self._nave_arm_token()
+        tx = self._nave_make_tx('TEST-NAVE-SSRF-004')
+
+        tx._process_notification_data({
+            'payment_id': 'pay-u',
+            'external_payment_id': 'TEST-NAVE-SSRF-004',
+            'payment_check_url': 'https://atacante.example.com@api-sandbox.ranty.io/payments/pay-u',
+        })
+
+        self.assertEqual(
+            mock_get.call_args[0][0],
+            'https://api-sandbox.ranty.io/payments/pay-u',
+        )
+
+    # ──────────────────────────────────────────────
+    # 7. ACTIVACIÓN DE MÉTODOS DE PAGO
+    # ──────────────────────────────────────────────
+
+    def test_18_provider_activates_its_payment_methods(self):
+        """Habilitar el proveedor activa sus métodos de pago.
+
+        Odoo archiva los métodos y sólo activa los que devuelve _get_default_payment_method_codes.
+        Sin implementarlo, el proveedor quedaba habilitado y el checkout no ofrecía ninguno.
+        """
+        self.assertEqual(
+            self.nave_provider._get_default_payment_method_codes(),
+            {'card', 'naranja', 'nave_qr'},
+        )
+
+        self.nave_qr_method.active = False
+        self.nave_provider.state = 'disabled'
+        self.nave_provider.state = 'test'
+
+        self.assertTrue(
+            self.nave_qr_method.active,
+            "Al habilitar el proveedor, su método de pago debe quedar activo",
+        )
+
+    # ──────────────────────────────────────────────
+    # 8. CONCILIACIÓN DE RESPALDO (CRON)
+    # ──────────────────────────────────────────────
+
+    def _nave_make_stale_tx(self, reference, request_id, minutes_old=90):
+        """Transacción pendiente y lo bastante vieja como para que el cron la tome."""
+        tx = self._nave_make_tx(reference)
+        tx.write({'nave_payment_request_id': request_id})
+        tx._set_pending()
+        old = fields.Datetime.now() - timedelta(minutes=minutes_old)
+        self.env.cr.execute(
+            "UPDATE payment_transaction SET create_date = %s WHERE id = %s", (old, tx.id)
+        )
+        tx.invalidate_recordset(['create_date'])
+        return tx
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_19_cron_reconciles_lost_webhook(self, mock_get):
+        """Si el webhook nunca llegó, el cron recupera el pago y concilia.
+
+        Nave reintenta cinco veces durante unas 7h45m y después se rinde; sin esta red la
+        transacción queda pendiente para siempre.
+        """
+        self._nave_arm_token()
+        tx = self._nave_make_stale_tx('TEST-NAVE-CRON-001', 'pr-cron-001')
+
+        mock_get.side_effect = [
+            # 1) la intención, ya cobrada, con el payment_id adentro
+            MagicMock(
+                json=MagicMock(return_value={
+                    'id': 'pr-cron-001',
+                    'status': {'name': 'SUCCESS_PROCESSED'},
+                    'payment_attempts': {'payments': [{'payment_id': 'pay-cron-001'}]},
+                }),
+                raise_for_status=MagicMock(return_value=None),
+            ),
+            # 2) la verificación del pago, el mismo camino que usa el webhook
+            MagicMock(
+                json=MagicMock(return_value={
+                    'id': 'pay-cron-001',
+                    'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
+                    'wallet': {'name': 'modo'},
+                }),
+                raise_for_status=MagicMock(return_value=None),
+            ),
+        ]
+
+        self.env['payment.transaction']._cron_nave_poll_pending_transactions()
+
+        self.assertEqual(tx.state, 'done')
+        self.assertEqual(tx.nave_payment_id, 'pay-cron-001')
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_20_cron_cancels_expired_intent(self, mock_get):
+        """Una intención vencida deja de estar pendiente en vez de quedar colgada."""
+        self._nave_arm_token()
+        tx = self._nave_make_stale_tx('TEST-NAVE-CRON-002', 'pr-cron-002')
+
+        mock_get.return_value = MagicMock(
+            json=MagicMock(return_value={'id': 'pr-cron-002', 'status': {'name': 'EXPIRED'}}),
+            raise_for_status=MagicMock(return_value=None),
+        )
+
+        self.env['payment.transaction']._cron_nave_poll_pending_transactions()
+
+        self.assertEqual(tx.state, 'cancel')
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_21_cron_skips_recent_transactions(self, mock_get):
+        """No se adelanta al webhook: las transacciones recientes se dejan en paz."""
+        self._nave_arm_token()
+        self._nave_make_stale_tx('TEST-NAVE-CRON-003', 'pr-cron-003', minutes_old=5)
+
+        self.env['payment.transaction']._cron_nave_poll_pending_transactions()
+
+        mock_get.assert_not_called()
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_22_cron_survives_a_failing_transaction(self, mock_get):
+        """Una transacción que falla no se lleva puesto el resto del lote."""
+        self._nave_arm_token()
+        failing = self._nave_make_stale_tx('TEST-NAVE-CRON-004', 'pr-cron-004')
+        healthy = self._nave_make_stale_tx('TEST-NAVE-CRON-005', 'pr-cron-005')
+
+        # El cron no garantiza el orden en que toma las transacciones, así que se responde
+        # según la URL consultada y no por posición.
+        def _dispatch(url, **kwargs):
+            if 'pr-cron-004' in url:
+                raise requests.exceptions.RequestException("boom")
+            if 'pr-cron-005' in url:
+                return MagicMock(
+                    json=MagicMock(return_value={
+                        'id': 'pr-cron-005',
+                        'status': {'name': 'SUCCESS_PROCESSED'},
+                        'payment_attempts': {'payments': [{'payment_id': 'pay-cron-005'}]},
+                    }),
+                    raise_for_status=MagicMock(return_value=None),
+                )
+            return MagicMock(
+                json=MagicMock(return_value={
+                    'id': 'pay-cron-005',
+                    'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
+                }),
+                raise_for_status=MagicMock(return_value=None),
+            )
+
+        mock_get.side_effect = _dispatch
+
+        self.env['payment.transaction']._cron_nave_poll_pending_transactions()
+
+        self.assertEqual(failing.state, 'pending', "La que falló queda como estaba")
+        self.assertEqual(healthy.state, 'done', "La sana se concilia igual")
+
+    # ──────────────────────────────────────────────
+    # 9. CAMBIO DE AMBIENTE
+    # ──────────────────────────────────────────────
+
+    def _nave_has_cached_token(self):
+        return bool(self.nave_provider.nave_access_token)
+
+    def test_23_switching_environment_clears_the_token(self):
+        """Pasar de Prueba a Producción invalida el token cacheado.
+
+        El token dura hasta 24 h y no se revalida solo. Sin invalidarlo, el módulo seguiría
+        mandando un token de sandbox a la API de producción y todas las llamadas darían 401.
+        """
+        self._nave_arm_token()
+        self.assertTrue(self._nave_has_cached_token())
+
+        self.nave_provider.state = 'enabled'
+
+        self.assertFalse(self._nave_has_cached_token(),
+                         "Al cambiar de ambiente el token viejo no puede sobrevivir")
+        self.assertFalse(self.nave_provider.nave_token_expiry)
+
+    def test_24_changing_credentials_clears_the_token(self):
+        """Reemplazar las credenciales también invalida el token que emitieron las anteriores."""
+        self._nave_arm_token()
+
+        self.nave_provider.nave_client_id = 'otro_client_id'
+
+        self.assertFalse(self._nave_has_cached_token())
+
+    def test_25_unrelated_write_keeps_the_token(self):
+        """Un cambio ajeno no descarta el token: sólo ambiente y credenciales lo invalidan."""
+        self._nave_arm_token()
+
+        self.nave_provider.name = 'Nave Test renombrado'
+
+        self.assertTrue(self._nave_has_cached_token())

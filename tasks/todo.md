@@ -36,5 +36,61 @@
 - [ ] Motor predictivo: Script Python/ORM para calcular el precio final necesario para que el Payout (Neto) iguale el precio base del producto.
 - [ ] Integración UI Backend: Modificación en vista de Listas de Precios (Form/List) para previsualizar el impacto del recargo financiero y seleccionar la regla.
 
+## Fase 5: Homologación con Nave
+> Plan detallado: `tasks/plan_homologacion_nave.md` (matriz de casos, evidencias y preguntas abiertas).
+
+### Bloqueantes previos (no se puede homologar sin esto)
+> **Estado al 2026-09-22: 9 de 11 cerrados.** Quedan sólo **B2 y B6** (devoluciones), congelados
+> hasta que Nave responda **N12**: el endpoint que usan desapareció de la documentación vigente.
+> Suite: **36 tests en verde** entre `payment_nave` y `pos_nave`.
+- [x] **B11** 🔴🔴 *(fix aplicado 2026-09-21, pendiente de verificación contra sandbox — casos S2/S3)* El POS consulta `GET /api/payment_requests/{id}` (estados de la **intención**: `SUCCESS_PROCESSED`, `FAILURE_PROCESSED`, `EXPIRED`…) pero el JS evalúa estados del **pago** (`APPROVED`, `REJECTED`). `APPROVED` nunca aparece en ese endpoint → **el camino feliz del Smart Point es inalcanzable** y el polling gira para siempre. Prioridad máxima, antes que B4.
+  - Aplicado: catálogo `NAVE_STATUS` con los 7 estados de intención documentados + los del pago como alias tolerado; manejo explícito de `EXPIRED`, `DISABLED` y `BLOCKED`; estado desconocido se registra en consola y sigue esperando en vez de cortar.
+  - Aplicado también **B4**: watchdog de 5 min atado al `duration_time`, tolerancia de 3 fallos de transporte seguidos antes de cortar, y distinción entre `silentCall` devolviendo `false` (error de servidor) y una respuesta válida de Nave.
+  - Aplicado `close()`: al salir de la pantalla de pago se corta el temporizador, que antes quedaba vivo consultando a Nave.
+  - **Sigue abierto B3**: `line.transaction_id` guarda el id de la intención. Para traer el `payment_id` real hace falta conocer la forma de la respuesta de la intención — se agregó un `_logger.debug` del payload crudo para averiguarla en la primera corrida (S3).
+- [x] **B1** *(b334209)* El wizard de link de pago no crea `payment.transaction` → el webhook no concilia nunca. Resuelto: la transacción se crea antes de llamar a Nave y su referencia es el `external_payment_id`. Probado end-to-end (`test_11_link_wizard_webhook_reconciles`).
+- [ ] **B2** Reembolso POS manda `"REFUND-CIEGO"` hardcodeado: falla siempre.
+- [x] **B3** *(657b23d)* El POS guarda el id de la *intención* en `transaction_id`, no el `payment_id` del pago. Resuelto: sale de `payment_attempts.payments[]`.
+- [x] **B4** *(resuelto junto con B11)* Polling del POS sin timeout ni manejo de `EXPIRED`/`DISABLED` → loop infinito; única salida "Force done".
+- [x] **B5** *(35a9ab7)* SSRF: `payment_check_url` del webhook se usa sin validar el host → se puede forzar un pago aprobado.
+- [ ] **B6** 🔴 El ciclo de devolución no cierra en **ningún** flujo (confirmado en alcance, D5): botón invisible en backend, `amount_to_refund` ignorado, `_set_canceled` sobre el registro equivocado, y el webhook `REFUNDED`/`CANCELLED` no modifica una tx en `done`. Además `nave_qr` declara `support_refund='partial'` y **Nave confirmó que es `full_only` (N10)**: corregir `data/payment_method_data.xml:33` + script de migración (el archivo es `noupdate="1"`) y declarar `full_only` en `_compute_feature_support_fields`.
+- [x] **B7** *(29d0e73)* El módulo nunca activa sus métodos de pago (falta `_get_default_payment_method_codes`). Verificado 2026-09-22: en instalación limpia **`card`, `naranja` y `nave_qr` quedan los tres inactivos**; en la base de homologación `card` y `nave_qr` están activos por causas ajenas al módulo. El resultado depende de la base, no del código.
+- [x] **B8** *(61d5101)* QR interoperable presencial: **implementado**. Segundo tipo de terminal `nave_qr`; el backend resuelve endpoint, host y `qr_amount` a partir del método de pago, y el cliente JS es el mismo. **Falta verificarlo contra sandbox**: necesita el `pos_id` de un QR de prueba (bloqueado por P13).
+  - Alcance original: Es desarrollo nuevo: endpoint `/api/payment_request/static_qr`, campo `qr_amount: "close"`, `pos_id` propio por QR físico. Homologable sin hardware vía el endpoint de simulación de sandbox (`doc_qr.md` §10).
+- [x] **B9** *(0cad826)* Sin `ir.cron` de respaldo si se pierde el webhook. Implementado: cada 15 min reconsulta la intención, saca el `payment_id` de `payment_attempts` y sigue el mismo camino que el webhook.
+- [x] **B10** *(22ce2f7)* Suite de `pos_nave` desalineada con el código. Reescrita y ampliada: **20 tests en verde** entre `pos_nave` y `payment_nave`.
+
+### Riesgo de go-live (no bloquea la homologación)
+- [ ] **B12** El ambiente se deriva del `state` del provider y la URL base se recalcula en cada llamada, nunca se guarda en la transacción. Al pasar de `test` a `enabled`: se rompen las devoluciones de pagos de homologación, el token cacheado de sandbox **no se invalida** (hasta 24 h mandando token de sandbox a producción) y las credenciales son un único par de campos. Ver `plan_homologacion_nave.md` §3.7 y el checklist de cutover.
+
+### Corrección de documentación interna
+- [ ] `tasks/todo.md` Fase 2 tilda "validación estricta de firma/hash" — **Nave no firma sus webhooks**: no está implementado ni es implementable con el contrato actual. La defensa real es el GET de verificación server-side.
+- [ ] Los diagramas de `docs/Modulo Nave - *.md` usan endpoints inexistentes (`/api/v1/checkouts`, `/api/integrations/payment`). El contrato real está en `tasks/doc_*.md`.
+
+### Bug encontrado al correr la suite (2026-09-22)
+- [x] **Migración rota** *(9c7f365)*: `payment_nave/migrations/18.0.1.2.0/end-migrate.py` declaraba `migrate(env)`. Odoo 18 sólo acepta `(cr, version)` y aborta **la carga del registro entera**. Cualquier base con el módulo por debajo de 18.0.1.2.0 no podía instalarlo ni actualizarlo.
+
+### Documentación oficial actualizada (2026-09-22)
+Relevada del DevPortal de Nave. Detalle en `tasks/plan_homologacion_nave.md` y `tasks/doc_actualizada_2026-09-22.md`.
+- [x] **B11 confirmado por la fuente**: la doc publica las dos tablas de estados por separado. El fix de `81c02c7` queda validado.
+- [x] 🔴 **B3 resuelto** *(657b23d)*: la respuesta de la intención trae `payment_attempts.payments[].payment_id`. Ya se puede traer el pago real, guardar el `payment_id` para devoluciones y poblar el ticket (marca, últimos 4, cupón, plan de cuotas).
+- [x] 🔴 **Host de Nave Point corregido** *(13e4b6a)*: sandbox de Nave Point es `https://e3-api.ranty.io`, no `api-sandbox.ranty.io`. `_nave_get_api_url()` devuelve uno solo para los cuatro flujos. El test `test_pos_nave_payment.py:67` tenía razón; el commit `ffb524b` fue en la dirección equivocada.
+- [ ] 🔴 **N12: el endpoint de devolución desapareció de la doc**. `DELETE /api/payments/{payment_id}` no aparece en ninguna de las cuatro páginas. Preguntar a Nave antes de invertir en B6.
+- [ ] 🟠 **Cancelar intención puede no aplicar a `smart_pos`**: el error de baja lista sólo `payment_link, dynamic_qr, static_qr`. Verificar el caso C4.
+- [ ] 🟠 **`buyer` es opcional**: dejar de mandar `'00000000'` / `'correo@temporal.com'` / `'S/D'` cuando el partner está incompleto.
+- [ ] 🟢 **Simulador PCT para QR**: `PUT /qrtools/transfer_payment/simulation/payment` paga *nuestra propia* intención. Permite homologar QR end-to-end sin hardware.
+- [ ] Bajar de **Nave > Integraciones > Sistema de gestión** el archivo con los IDs de puntos de venta.
+
+### Bloqueo operativo con Nave (2026-09-21)
+- [ ] 🔴🔴 **Conseguir acceso al comercio/local de prueba.** La terminal `L40000978` se identifica como dispositivo TEST y pide vincularse a un local "test" que no existe en nuestro Espacio Nave. El QR que se pudo descargar es de **producción** (`Be onlyone Jujuy - QR 1`) y **no debe usarse para pruebas**: son cobros reales. Bloquea los bloques C y H completos. Ver `plan_homologacion_nave.md` §3.10.
+
+### Ejecución
+- [ ] E0 — Correr suites, flake8 y bandit (línea de base).
+- [ ] E1 — Cerrar bloqueantes B1-B6.
+- [ ] E2 — Preparar entorno (base de homologación, terminal física, notification_url registrada).
+- [ ] E3 — Ejecutar la matriz de casos (bloques A a G).
+- [ ] E4 — Empaquetar evidencias y demo a Nave.
+
 ## Pendientes / Mejoras a Futuro
 - [ ] Analizar y definir el flujo/duración de los links de pago de Nave para facturas recurrentes de suscripción (evitando la expiración de 24 horas del enlace si el cliente demora en pagar).
+  - **Fuente encontrada (2026-09-21):** el panel de Nave ofrece vencimiento de **24 h, 48 h o 7 días**. No es un límite de la API (`duration_time` en segundos, default 1 semana), es la opción por defecto del panel. Poner tope de 168 h y validación en el wizard.

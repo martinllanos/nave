@@ -7,13 +7,14 @@
 import logging
 import requests
 
-from odoo import api, fields, models, _
+from odoo import Command, api, fields, models, _
 from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
 
 # Duración predeterminada del link de pago en segundos (24 horas)
-_DEFAULT_LINK_DURATION = 86400
+# Tope de `external_payment_id` en la API de Nave.
+NAVE_EXTERNAL_ID_MAX_LENGTH = 36
 
 
 class NavePaymentLinkWizard(models.TransientModel):
@@ -175,8 +176,12 @@ class NavePaymentLinkWizard(models.TransientModel):
         # Construir payload de productos
         products_payload = self._nave_build_products_payload()
 
+        # La transacción se crea ANTES de llamar a Nave porque su referencia es el
+        # external_payment_id que se envía. Si la llamada falla, la excepción revierte la creación.
+        transaction = self._nave_create_transaction()
+
         payload = {
-            'external_payment_id': self.external_reference[:36],  # Máx 36 chars
+            'external_payment_id': transaction.reference,
             'seller': {
                 'pos_id': provider.nave_pos_id,
             },
@@ -227,9 +232,9 @@ class NavePaymentLinkWizard(models.TransientModel):
                     response_json = e.response.json()
                     if isinstance(response_json, dict):
                         msg = (
-                            response_json.get('message') or 
-                            response_json.get('error') or 
-                            response_json.get('description')
+                            response_json.get('message')
+                            or response_json.get('error')
+                            or response_json.get('description')
                         )
                         validation_errors = response_json.get('errors') or response_json.get('validation_errors')
                         if msg:
@@ -254,6 +259,15 @@ class NavePaymentLinkWizard(models.TransientModel):
                 "Nave procesó la solicitud pero no devolvió una URL de pago válida."
             ))
 
+        # Completar la transacción con los datos que devolvió Nave y dejarla a la espera del pago.
+        transaction.write({
+            'nave_payment_request_id': payment_request_id,
+            'nave_checkout_url': checkout_url,
+        })
+        transaction._set_pending(state_message=_(
+            "Link de pago generado en Nave. A la espera de que el cliente pague."
+        ))
+
         # Guardar resultado en el wizard para mostrarlo en el formulario
         self.write({
             'nave_link': checkout_url,
@@ -262,7 +276,7 @@ class NavePaymentLinkWizard(models.TransientModel):
         })
 
         # Registrar el link en el chatter del documento origen (si aplica)
-        self._post_link_to_chatter(checkout_url)
+        self._post_link_to_chatter(checkout_url, transaction)
 
         # Re-abrir el mismo wizard (ya con el campo del link visible)
         return {
@@ -346,7 +360,67 @@ class NavePaymentLinkWizard(models.TransientModel):
             },
         }
 
-    def _post_link_to_chatter(self, checkout_url):
+    def _nave_get_payment_method(self):
+        """ Devuelve un `payment.method` válido para registrar la transacción.
+
+        El pagador elige el medio recién en el checkout de Nave, así que acá sólo hace falta uno
+        cualquiera del proveedor: `payment.transaction.payment_method_id` es obligatorio.
+        """
+        self.ensure_one()
+        # active_test=False a propósito: el método de pago que lleva la transacción es un dato de
+        # registro, no algo que se muestre en el checkout. Si se filtraran los archivados, el
+        # wizard dejaría de funcionar justo cuando los métodos de Nave están desactivados, que es
+        # el estado por defecto mientras no se implemente _get_default_payment_method_codes().
+        methods = self.provider_id.with_context(active_test=False).payment_method_ids
+        method = methods.filtered(lambda m: m.is_primary)[:1] or methods[:1]
+        if not method:
+            raise UserError(_(
+                "El proveedor Nave no tiene métodos de pago configurados. "
+                "Revisá la pestaña 'Métodos de Pago' del proveedor antes de generar el link."
+            ))
+        return method
+
+    def _nave_prepare_transaction_values(self, reference):
+        """ Valores de la `payment.transaction` que respalda el link de pago. """
+        self.ensure_one()
+        values = {
+            'provider_id': self.provider_id.id,
+            'payment_method_id': self._nave_get_payment_method().id,
+            'reference': reference,
+            'amount': self.amount,
+            'currency_id': self.currency_id.id,
+            'partner_id': self.partner_id.id,
+            'operation': 'online_redirect',
+        }
+        if self.move_id:
+            values['invoice_ids'] = [Command.set([self.move_id.id])]
+        if self.sale_id:
+            values['sale_order_ids'] = [Command.set([self.sale_id.id])]
+        return values
+
+    def _nave_create_transaction(self):
+        """ Crea la transacción que el webhook de Nave va a buscar por `external_payment_id`.
+
+        La referencia se calcula con `_compute_reference`, que garantiza unicidad agregando un
+        sufijo si ya existe otra con el mismo prefijo. Esa misma referencia es la que viaja como
+        `external_payment_id`: si las dos no coinciden exactamente, el webhook no encuentra la
+        transacción y el pago nunca se concilia.
+        """
+        self.ensure_one()
+        reference = self.env['payment.transaction']._compute_reference(
+            self.provider_id.code, prefix=self.external_reference,
+        )
+        if len(reference) > NAVE_EXTERNAL_ID_MAX_LENGTH:
+            raise UserError(_(
+                "La referencia '%(ref)s' supera los %(max)s caracteres que admite Nave. "
+                "Usá una referencia externa más corta.",
+                ref=reference, max=NAVE_EXTERNAL_ID_MAX_LENGTH,
+            ))
+        return self.env['payment.transaction'].sudo().create(
+            self._nave_prepare_transaction_values(reference)
+        )
+
+    def _post_link_to_chatter(self, checkout_url, transaction):
         """
         Registra el link de pago generado en el chatter del documento fuente.
         Esto permite trazabilidad completa de los links enviados desde Odoo.
@@ -357,7 +431,7 @@ class NavePaymentLinkWizard(models.TransientModel):
             "<a href='%(url)s' target='_blank'>%(url)s</a><br/>"
             "<small>Referencia: %(ref)s | Monto: %(amount)s ARS</small>",
             url=checkout_url,
-            ref=self.external_reference,
+            ref=transaction.reference,
             amount=f"{self.amount:.2f}",
         )
         doc = self.move_id or self.sale_id

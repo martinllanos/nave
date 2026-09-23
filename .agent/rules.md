@@ -44,8 +44,10 @@ Always refer to the documentation matching the Target Version:
 
 ## 6. PRE-PUSH VALIDATION (Mandatory)
 Before **every** commit or `git push`, you MUST run and pass auditor tools against the specific configuration file for the project (`/home/martin/server/18/nave/setup.cfg`):
-1. **Flake8** (lint): `flake8 --config=/home/martin/server/18/nave/setup.cfg payment_nave/ pos_nave/`
-2. **Bandit** (security): `bandit -r payment_nave/ pos_nave/ -c /home/martin/server/18/nave/setup.cfg --exclude '*/demo,docs,tests' -ll`
+1. **Flake8** (lint): `flake8 --config=/home/martin/server/18/nave/setup.cfg payment_nave/ pos_nave/ sale_nave_simulator/`
+2. **Bandit** (security): `bandit -r payment_nave/ pos_nave/ sale_nave_simulator/ --exclude '*/demo,docs,tests' -ll`
+   - Sin `-c setup.cfg`: bandit espera un config YAML y `setup.cfg` es INI, por lo que esa opción hacía **abortar la corrida entera** (`Error parsing file`). El chequeo nunca llegaba a ejecutarse.
+   - Bandit se instala con `pipx install bandit` (el entorno del sistema es PEP 668 / externally-managed).
 
 **Rules:**
 - If either tool reports errors, fix them BEFORE pushing or completing the task.
