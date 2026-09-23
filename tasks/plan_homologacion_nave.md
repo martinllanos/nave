@@ -450,6 +450,33 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.13 Verificación en producción tras cargar el `pos_id` correcto (2026-09-23)
+
+Con `b1c04ade-…` cargado en el método de pago y el código nuevo desplegado, se lanzó un cobro de
+$ 12,00 desde el POS. Resultado, medido en el log del servidor:
+
+| Hito | Evidencia |
+|---|---|
+| **El `pos_id` era la causa raíz** | `Enviando solicitud Smart POS a la terminal b1c04ade-…` y la intención se crea en <1 s. Con el `pos_id` de e-commerce la misma llamada colgaba 10 s y moría |
+| **`e3-api.ranty.io` es correcto** | La API responde normal. El commit `ffb524b` esquivaba un host sano |
+| **B11 — vocabulario de estados** | El polling corre cada ~3,4 s, respuestas 200 en ~0,3 s, sin romperse |
+| **B4 — watchdog** | Intención a las 00:44:12, última consulta a las **00:49:11**. 299 s: cortó en el segundo previsto y el POS mostró *"Se agotó el tiempo de espera del cobro"* con la línea en "Volver a intentar" |
+| **Sin cobro fantasma** | La orden anterior se cerró en **Efectivo**, sin `transaction_id` de Nave |
+
+**Lo que falta es sólo la vinculación.** Nave acepta y registra la intención, pero no tiene a qué
+dispositivo entregársela, así que el ciclo llega al tope sin novedad. Todo el lado Odoo está probado.
+
+**🔴 C4 confirmado con evidencia**: la baja de una intención `smart_pos` devuelve
+
+```
+400 Client Error: Bad Request for url: .../api/payment_requests/{id}
+```
+
+consistente con el catálogo de errores, que sólo admite baja para `payment_link, dynamic_qr,
+static_qr`. Y el JS devuelve `true` igual, así que **el cajero ve "cancelado" mientras la intención
+sigue viva** hasta expirar sola. Pendiente de arreglar y de consultar a Nave cómo se da de baja un
+cobro de terminal.
+
 ### 3.11 Modo acordado: producción acotada (2026-09-22)
 
 **Decisión**: se homologa sobre `www.onlyone.ar` con **cobros reales de importe acotado**, en lugar
