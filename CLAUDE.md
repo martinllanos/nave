@@ -6,7 +6,7 @@ Repo de dos módulos Odoo 18 para la pasarela de pagos Nave:
 - `pos_nave` — pagos presenciales (Nave Point / QR, integración POS con OWL 2.0).
 - `sale_nave_simulator` — simulador de cuotas/costos en ventas.
 
-Rama de trabajo: `18.0-dev`.
+Rama de trabajo: **`18.0`**. Es la que consume doodba (`ODOO_VERSION=18.0`) para construir la imagen del entorno de homologación, así que un cambio no llega al servidor hasta que está en esa rama.
 
 ## Reglas del proyecto
 
