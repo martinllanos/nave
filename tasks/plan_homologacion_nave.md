@@ -473,9 +473,16 @@ dispositivo entregársela, así que el ciclo llega al tope sin novedad. Todo el 
 ```
 
 consistente con el catálogo de errores, que sólo admite baja para `payment_link, dynamic_qr,
-static_qr`. Y el JS devuelve `true` igual, así que **el cajero ve "cancelado" mientras la intención
-sigue viva** hasta expirar sola. Pendiente de arreglar y de consultar a Nave cómo se da de baja un
-cobro de terminal.
+static_qr`.
+
+**Arreglado (`2ccc47d`)**: el cliente ahora lee la respuesta y, si Nave rechazó la baja, avisa que el
+cobro puede seguir activo en la terminal y hay que cancelarlo desde el equipo. Se sigue devolviendo
+`true` a propósito: con `false` el core deja la línea en `waitingCard` con el polling ya detenido, y
+el cajero queda sin salida.
+
+**Pendiente**: preguntarle a Nave cómo se da de baja una intención de terminal (agregado al borrador
+de correo). Si no hay forma desde el sistema, el comportamiento actual es el correcto y hay que
+documentarlo en el instructivo del cajero.
 
 ### 3.11 Modo acordado: producción acotada (2026-09-22)
 

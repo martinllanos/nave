@@ -23,6 +23,19 @@ Aprovecho para confirmar dos datos, así lo dejamos configurado de una:
 1. ¿Sigue vigente el `pos_id` `b1c04ade-dec9-4ca0-9fd9-8464c9006764` para esa terminal?
 2. Ese `pos_id`, ¿es el mismo para sandbox y para producción, o hay uno por ambiente?
 
+3. **¿Cómo se da de baja una intención de pago de Nave Point?** Al llamar a
+   `DELETE /api/payment_requests/{id}` sobre una intención `smart_pos` recibimos:
+
+   ```
+   400 Bad Request — payment_request_delete_failed
+   "The payment request could not be deleted. It does not belong to a payment_link,
+    dynamic_qr, static_qr..."
+   ```
+
+   Entendemos entonces que las intenciones de terminal no se dan de baja por ese endpoint. ¿Hay
+   otra forma de cancelarlas desde el sistema de gestión, o la única opción es cancelar desde la
+   propia terminal y esperar a que la intención expire por `duration_time`?
+
 Quedamos atentos. Muchas gracias.
 
 Saludos cordiales,
