@@ -1,5 +1,63 @@
 # Borradores de correo a Nave
 
+## Borrador 3 — credenciales de producción (2026-10-05)
+
+> Correo **nuevo** a `integraciones@navenegocios.com`, con copia a Jonathan Castillo, que viene
+> respondiendo en el día. No va en el hilo de la terminal: es otro tema.
+
+---
+
+**Asunto:** Credenciales de producción para integración API — Be onlyone, CUIT 20-26253453-8
+
+Hola, buen día.
+
+Les escribo desde **Be onlyone** (CUIT **20-26253453-8**). Tenemos la integración de Odoo 18 con la
+API de Nave funcionando contra **sandbox** y estamos pasando a producción.
+
+Nos falta un dato para completarlo: **el set de credenciales de producción** (`client_id` y
+`client_secret`). Las únicas que tenemos son las de sandbox, que nos enviaron el 18/06 en el correo
+*"Integración Nave | Sandbox | Onlyone"*.
+
+Lo verificamos probando las credenciales que tenemos contra los dos ambientes de autenticación:
+
+| Endpoint | Resultado |
+|---|---|
+| `homoservices.apinaranja.com/.../auth0/b2b/m2msPrivate` (sandbox) | **200**, token emitido |
+| `services.apinaranja.com/.../auth0/b2b/m2msPrivate` (producción) | **401 Unauthorized** |
+
+Así que, con lo que tenemos, el ambiente productivo no llega a autenticar.
+
+**Lo que necesitamos:**
+
+1. **`client_id` y `client_secret` de producción** para nuestro CUIT.
+
+2. Aprovecho para confirmar los `pos_id` de producción que descargamos de *Integraciones > Sistema
+   de gestión*, para asegurarnos de que cada uno corresponde al medio que creemos:
+
+   | Medio | `pos_id` |
+   |---|---|
+   | Tienda online / e-commerce | `b4c94f29-0910-448e-9ad7-6dd2f791a957` |
+   | Link de pago | `925a1b22-fc90-47b7-a92a-cf9f621139b5` |
+
+   Lo preguntamos porque comprobamos que **cada `pos_id` está asociado a un medio de cobro**: al
+   usar el de la tienda para generar un link de pago, la API responde
+   `400 {"code": "invalid_pos", "message": "Given POS is for a different payment type"}`. Queremos
+   evitar ese error en producción.
+
+3. La `notification_url` registrada sigue siendo `https://www.onlyone.ar/payment/nave/webhook`, la
+   misma para ambos ambientes. Si para producción hace falta alguna confirmación adicional de
+   nuestra parte, indíquennos.
+
+Quedamos a la espera. Muchas gracias.
+
+Saludos cordiales,
+
+**Martín Llanos**
+Be onlyone — CUIT 20-26253453-8
+martinllanos@onlyone.com.ar
+
+---
+
 ## Borrador 2 — nuevo código de vinculación para la terminal (2026-09-22)
 
 > Va como **respuesta en el hilo ya abierto**: *"Nave Point: S/N: L40000978 (DEBUG) - Pide soporte
