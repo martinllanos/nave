@@ -26,13 +26,21 @@
 
     <!-- Plantilla de Redirección automática de Checkout para Odoo 17/18 -->
     <template id="redirect_form">
-        <!-- 
-            Al hacer clic en "Pagar" en el checkout de Odoo, se renderiza este formulario invisible.
-            t-att-action="api_url" redirige al navegador inmediatamente al Checkout de Nave
-            usando el método GET ya que la intención de pago ya fue creada Server-to-Server.
+        <!--
+            Al hacer clic en "Pagar" en el checkout de Odoo, se renderiza este formulario invisible
+            y el navegador lo envía al Checkout de Nave. Va por GET porque la intención de pago ya
+            fue creada server to server.
+
+            Los parámetros con los que Nave identifica la intención van como campos y no en la
+            acción: un envío GET descarta el query string de la acción y lo reemplaza por los
+            campos, de modo que dejarlos en la URL hacía que el cliente llegara a Nave sin su
+            intención y viera una pantalla en blanco.
         -->
         <form t-att-action="api_url" method="get">
-            <!-- No se requieren campos ocultos adicionales -->
+            <input t-foreach="nave_redirect_params" t-as="param"
+                   type="hidden"
+                   t-att-name="param[0]"
+                   t-att-value="param[1]"/>
         </form>
     </template>
 

@@ -3,7 +3,7 @@
 import logging
 import requests
 from datetime import timedelta
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import parse_qsl, urlparse, urlunparse
 from werkzeug import urls
 
 from odoo import api, fields, models, _
@@ -140,9 +140,22 @@ class PaymentTransaction(models.Model):
             'nave_checkout_url': checkout_url,
         })
 
-        # Retornamos el api_url que usará el template xml para hacer la redirección automática
+        # El formulario de redirección se envía con GET, y un envío GET descarta el query string
+        # de la acción y lo reemplaza por los campos del formulario. Por eso la URL viaja partida:
+        # los parámetros van como campos y el navegador los vuelve a poner. Dejarlos en la acción
+        # hacía que el cliente llegara a Nave sin la intención, ante una pantalla en blanco.
+        return self._nave_redirect_values(checkout_url)
+
+    def _nave_redirect_values(self, checkout_url):
+        """ Parte la URL del checkout en acción y parámetros, para que el envío GET los conserve.
+
+        Los parámetros se leen de lo que Nave devuelve, en vez de darse por sabidos: hoy manda sólo
+        `payment_request_id`, pero eso no figura en la documentación y no es un contrato.
+        """
+        partes = urlparse(checkout_url)
         return {
-            'api_url': checkout_url,
+            'api_url': urlunparse(partes._replace(query='')),
+            'nave_redirect_params': parse_qsl(partes.query),
         }
 
     # ==========================================

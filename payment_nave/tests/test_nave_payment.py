@@ -1369,3 +1369,58 @@ class TestNaveProvider(PaymentCommon):
 
         self.assertEqual(propia['duration_time'], 1800)
         self.assertEqual(ajena['duration_time'], 5400)
+
+    # ──────────────────────────────────────────────
+    # 10. LA REDIRECCIÓN LLEVA AL CLIENTE A SU INTENCIÓN
+    # ──────────────────────────────────────────────
+
+    def _nave_render_redirect(self, checkout_url):
+        """Renderiza el formulario de redirección tal como lo hace el core de `payment`."""
+        tx = self.env['payment.transaction'].create({
+            'provider_id': self.nave_provider.id,
+            'payment_method_id': self.nave_qr_method.id,
+            'amount': 500.0,
+            'currency_id': self.currency_ars.id,
+            'reference': f"TEST-REDIR-{abs(hash(checkout_url)) % 10**8}",
+            'partner_id': self.partner.id,
+            'operation': 'online_redirect',
+        })
+        valores = tx._nave_redirect_values(checkout_url)
+        vista = self.env.ref('payment_nave.redirect_form')
+        return valores, self.env['ir.qweb']._render(vista.id, valores)
+
+    def test_55_la_redireccion_conserva_la_intencion(self):
+        """Un envío GET descarta el query string de la acción y lo reemplaza por los campos.
+
+        Con el identificador sólo en la acción, el cliente llegaba a Nave sin su intención y veía
+        una pantalla en blanco: el pedido quedaba esperando un pago que no se podía completar.
+        """
+        url = 'https://sandbox-hosted-checkout.ranty.io/nave?payment_request_id=f9d279b1-abc'
+
+        valores, html = self._nave_render_redirect(url)
+
+        self.assertEqual(valores['api_url'], 'https://sandbox-hosted-checkout.ranty.io/nave',
+                         "La acción no debe depender del query string")
+        self.assertIn('name="payment_request_id"', html,
+                      "El identificador debe viajar como campo del formulario")
+        self.assertIn('value="f9d279b1-abc"', html)
+
+    def test_56_la_redireccion_conserva_todos_los_parametros(self):
+        """Los parámetros los decide Nave y no están documentados: no se suponen."""
+        url = 'https://sandbox-hosted-checkout.ranty.io/nave?payment_request_id=abc&lang=es&v=2'
+
+        valores, html = self._nave_render_redirect(url)
+
+        self.assertEqual(len(valores['nave_redirect_params']), 3)
+        for nombre in ('payment_request_id', 'lang', 'v'):
+            self.assertIn(f'name="{nombre}"', html, f"Falta el parámetro {nombre}")
+
+    def test_57_la_redireccion_sin_parametros_no_rompe(self):
+        """Si Nave devolviera una URL sin parámetros, se redirige tal cual."""
+        url = 'https://sandbox-hosted-checkout.ranty.io/nave'
+
+        valores, html = self._nave_render_redirect(url)
+
+        self.assertEqual(valores['api_url'], url)
+        self.assertEqual(valores['nave_redirect_params'], [])
+        self.assertNotIn('type="hidden"', html)
