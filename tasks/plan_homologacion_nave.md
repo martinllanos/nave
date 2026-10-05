@@ -283,7 +283,7 @@ GET https://api-sandbox.ranty.io/instore/external/resolve?data={QR_FIJO}&access_
 
 Eso permite automatizar el bloque H completo y no depender de una billetera real para las pruebas.
 
-### B9 — Sin cron de respaldo si se pierde el webhook 🟠
+### B9 — Sin cron de respaldo si se pierde el webhook ✅ RESUELTO
 
 No existe ningún `ir.cron` en `payment_nave` (confirmado también en la base del servidor: cero crones
 con "nave" en el nombre). Nave reintenta durante ~7h45m y se rinde. Si el sitio estuvo caído más que
@@ -292,6 +292,12 @@ eso, la transacción queda en Pendiente **para siempre**.
 El plugin oficial de Nave resuelve esto con un cron cada 15 min que re-consulta órdenes pendientes
 (`docs/nave-for-woocommerce/src/Handler/CronHandler.php:27-28,72-93`). Recomiendo replicarlo: es la
 diferencia entre "se nos perdió un pago" y "se recupera solo".
+
+**Resuelto** en `_cron_nave_poll_pending_transactions` (`payment_transaction.py`): re-consulta las
+transacciones Nave en `draft` o `pending` con más de 30 minutos y menos de 2 días, con un savepoint
+por transacción para que una falla no se lleve puesto el lote. Los dos límites se ajustan con
+`payment_nave.poll_min_age_minutes` y `payment_nave.poll_max_age_days`. Verificado con datos reales
+en §3.19.
 
 ### B10 — La suite de `pos_nave` está desalineada con el código 🟠
 
@@ -451,6 +457,40 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
+
+### 3.19 A8 verificado: la intención expira y el cron la cierra sola (2026-10-05)
+
+Tres intenciones de checkout creadas a las 17:07 UTC quedaron sin pagar. A las 17:57 UTC —exactamente
+los 3000 s del `duration_time`— Nave las pasó de `PENDING` a `EXPIRED`, con `payment_attempts.payments`
+vacío. Nave **no notifica la expiración**: no llega ningún webhook, así que las tres transacciones
+siguieron en `draft` en Odoo.
+
+Corrida manual del cron de conciliación (B9):
+
+```
+[payment_nave] Reconsultando 3 transacciones pendientes.
+S00011 | estado=cancel | mensaje=Nave informó la intención de pago como EXPIRED.
+S00012 | estado=cancel | mensaje=Nave informó la intención de pago como EXPIRED.
+S00013 | estado=cancel | mensaje=Nave informó la intención de pago como EXPIRED.
+```
+
+Tres cosas que esto deja probadas con datos reales, no con mocks:
+
+1. El catálogo de estados de la intención incluye `EXPIRED` tal como lo documenta Nave, y
+   `_nave_poll_payment_request` lo lleva a `_set_canceled` con el motivo a la vista. El pronóstico
+   viejo de la matriz (`_set_error` "Estado desconocido") ya no aplica.
+2. El cron alcanza transacciones en `draft`, no sólo en `pending`. Importa: una intención que expira
+   sin ningún intento de pago nunca pasa por `pending`, así que un dominio restringido a `pending`
+   —que es lo que uno escribe por reflejo— las habría dejado colgadas para siempre.
+3. La expiración es la única resolución de una intención que **no** genera webhook. Sin el cron no hay
+   forma de enterarse.
+
+**Pendiente de diseño**: el `duration_time` del checkout está hardcodeado en 3000 s
+(`payment_transaction.py:85`), mientras el wizard del link sí lo expone como `duration_hours` y el
+default de Nave es una semana en los cuatro flujos. Cincuenta minutos es razonable para un carrito
+web, pero es un número que nadie puede cambiar sin editar el código. Va junto con B7c (el wizard del
+link no manda `additional_info.callback_url`, así que el cliente que paga una factura nunca vuelve a
+Odoo) como un mismo cambio sobre la construcción de los payloads.
 
 ### 3.18 El checkout recibe los datos de tarjeta y cuotas, y los descarta (2026-10-05)
 
@@ -1061,7 +1101,7 @@ deciden cómo se escribe el fix de B11.
 | A5 | Rechazo por fondos | `4025 2200 0000 0127` | tx → `cancel` con el `reason_code` de Nave en el chatter | ⬜ |
 | A6 | Rechazo Naranja | `5895 6248 9347 1379` | Ídem A5 | ⬜ |
 | A7 | Abandono del checkout | Llegar a Nave y cerrar la pestaña | tx queda `draft`/`pending`, el pedido no se confirma, sin asientos | ⬜ |
-| A8 | Expiración de la intención | Crear intención y esperar los 3000 s del `duration_time` hardcodeado (`payment_transaction.py:80`) | Nave marca `EXPIRED`. **Se espera `_set_error` "Estado desconocido"** — `EXPIRED` no está mapeado | ⬜ |
+| A8 | Expiración de la intención | Crear intención y esperar los 3000 s del `duration_time` hardcodeado (`payment_transaction.py:85`) | Nave marca `EXPIRED` y el cron de conciliación deja la transacción en Cancelado con el motivo a la vista | ✅ 2026-10-05, §3.19 |
 | A9 | Monto con decimales | Pedido por $1.234,56 | `amount.value == "1234.56"` (string, 2 decimales) en el payload | ⬜ |
 | A10 | Cliente sin CUIT ni email | Partner incompleto | Se envían los defaults `'00000000'` / `'correo@temporal.com'` (`payment_transaction.py:199,205`). Confirmar que Nave los acepta | ⬜ |
 | A11 | CUIT con guiones | Partner con `20-05536168-2` | El módulo no limpia guiones (`:196-200`). Verificar si Nave lo rechaza | ⬜ |
@@ -1148,7 +1188,7 @@ deciden cómo se escribe el fix de B11.
 | D5c | Webhook duplicado | Enviar el mismo webhook dos veces | Idempotente: sin doble asiento | ⬜ |
 | D6c | Webhook fuera de orden | `APPROVED` y después `PENDING` | La tx no debe retroceder de `done` | ⬜ |
 | D7c | Reintentos de Nave | Devolver 500 en el primer intento | Nave reintenta a los 10 s y concilia en el segundo | ⬜ |
-| D8c | Pérdida total del webhook | Bajar el sitio > 7h45m y pagar | 🚫 La tx queda pendiente para siempre — **no hay cron de respaldo** (B9) | ⬜ |
+| D8c | Pérdida total del webhook | Bajar el sitio > 7h45m y pagar | El cron de conciliación (B9, resuelto) recupera la transacción en la corrida siguiente. Su rama `EXPIRED` ya quedó verificada en A8 | ⬜ |
 | D9c | `REFUNDED` sobre tx `done` | Simular el webhook | `_set_canceled` no admite `done` → **warning y sin efecto** (`payment_transaction.py:297-299`) | ⬜ |
 | D10c | Token vencido a mitad de sesión | Forzar expiración | No hay reintento ni invalidación reactiva ante 401 (`payment_provider.py:60-129`) | ⬜ |
 
