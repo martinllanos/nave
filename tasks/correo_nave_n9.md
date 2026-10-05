@@ -1,5 +1,52 @@
 # Borradores de correo a Nave
 
+## Borrador 4 — permiso de devoluciones por API (2026-10-05)
+
+> Correo **nuevo** a `integraciones@navenegocios.com`, con copia a Jonathan Castillo.
+> Mismo criterio que el borrador 3: pedido puntual, sin explicar de más. La diferencia con el pedido
+> que se hizo el 2026-09-22 es que ya no preguntamos cuál es el endpoint: lo ubicamos, y lo que
+> falta es el permiso. Ver `plan_homologacion_nave.md` §3.21.
+
+---
+
+**Asunto:** Habilitación de devoluciones por API — Be onlyone, CUIT 20-26253453-8
+
+Hola, buen día.
+
+Les escribo desde **Be onlyone** (CUIT **20-26253453-8**).
+
+Necesitamos **habilitar las devoluciones por API** para nuestras credenciales. Al invocar
+
+```
+DELETE /api/payments/{payment_id}
+```
+
+con un token válido, la API responde:
+
+```
+403 — "User is not authorized to access this resource because no identity-based policy
+       allows the execute-api:Invoke action"
+```
+
+Por lo que entendemos, el recurso existe y a nuestro `client_id` le falta el permiso sobre ese
+método. ¿Nos lo pueden habilitar, en sandbox y en producción?
+
+Dos consultas que acompañan al pedido:
+
+1. El endpoint no figura en la documentación del DevPortal. ¿Sigue siendo el vigente para
+   devoluciones, o hay otro que debamos usar?
+2. ¿La devolución admite importe parcial, o es siempre por el total del pago?
+
+Quedamos a la espera. Muchas gracias.
+
+Saludos cordiales,
+
+**Martín Llanos**
+Be onlyone — CUIT 20-26253453-8
+martinllanos@onlyone.com.ar
+
+---
+
 ## Borrador 3 — credenciales de producción (2026-10-05)
 
 > Correo **nuevo** a `integraciones@navenegocios.com`, con copia a Jonathan Castillo.
