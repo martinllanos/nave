@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!--
+        Datos del cobro que informa Nave. Se muestran sólo cuando hay algo que mostrar: una
+        transacción de otro proveedor, o una de Nave que todavía no se cobró, no tiene nada de esto.
+    -->
+    <record id="payment_transaction_form_nave" model="ir.ui.view">
+        <field name="name">payment.transaction.form.inherit.nave</field>
+        <field name="model">payment.transaction</field>
+        <field name="inherit_id" ref="payment.payment_transaction_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//sheet" position="inside">
+                <group string="Datos del cobro en Nave" invisible="provider_code != 'nave'">
+                    <group string="Instrumento">
+                        <field name="nave_card_brand" invisible="not nave_card_brand"/>
+                        <field name="nave_card_type" invisible="not nave_card_type"/>
+                        <field name="nave_card_last4" invisible="not nave_card_last4"/>
+                        <field name="nave_card_issuer" invisible="not nave_card_issuer"/>
+                        <field name="nave_payment_input" invisible="not nave_payment_input"/>
+                        <field name="nave_wallet_name" invisible="not nave_wallet_name"/>
+                    </group>
+                    <group string="Comprobantes">
+                        <field name="nave_payment_id" invisible="not nave_payment_id"/>
+                        <field name="nave_payment_code" invisible="not nave_payment_code"/>
+                        <field name="nave_auth_code" invisible="not nave_auth_code"/>
+                        <field name="nave_batch" invisible="not nave_batch"/>
+                    </group>
+                    <group string="Financiación" invisible="nave_installments &lt; 2">
+                        <field name="nave_installments"/>
+                        <field name="nave_installment_has_interest"/>
+                        <field name="nave_interest_rate" invisible="not nave_interest_rate"/>
+                        <field name="nave_annual_nominal_rate" invisible="not nave_annual_nominal_rate"/>
+                        <field name="nave_total_financial_cost" invisible="not nave_total_financial_cost"/>
+                        <field name="nave_customer_total"/>
+                    </group>
+                </group>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>

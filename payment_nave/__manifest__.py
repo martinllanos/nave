@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Proveedor de Pago Nave',
-    'version': '18.0.1.9.0',
+    'version': '18.0.1.10.0',
     'category': 'Accounting/Payment Providers',
     'summary': 'Integración oficial con Nave para cobros online en e-commerce y links de pago.',
     'description': """
@@ -25,6 +25,7 @@
     'data': [
         'security/ir.model.access.csv',
         'views/payment_provider_views.xml',
+        'views/payment_transaction_views.xml',
         'views/nave_link_wizard_views.xml',
         'data/payment_method_data.xml',
         'data/payment_provider_data.xml',

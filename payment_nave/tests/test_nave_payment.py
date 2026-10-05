@@ -990,3 +990,138 @@ class TestNaveProvider(PaymentCommon):
         registrado = "\n".join(logs.output)
         self.assertIn('TEST-NAVE-RETRY-004', registrado)
         self.assertIn('REJECTED', registrado)
+
+    # ──────────────────────────────────────────────
+    # 12. DATOS DEL COBRO
+    # ──────────────────────────────────────────────
+
+    # Payload real del pedido S00007, capturado del sandbox el 2026-10-05: $1.150 de venta pagados
+    # en 3 cuotas con interés, con un total de $1.263,10 a cargo del cliente.
+    PAGO_CUOTAS = {
+        'id': 'pay-s00007',
+        'payment_code': 'AYO870166980',
+        'payment_input': 'manual_input',
+        'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
+        'payment_method': {
+            'type': 'card_payment', 'card_brand': 'VISA', 'card_type': 'CREDIT',
+            'card_last4': '0231', 'bin': '476122',
+            'issuer': 'BANCO SANTANDER ARGENTINA S.A.',
+            'installment_plan': {
+                'name': 'CUOTA SIMPLE 3', 'installments': 3, 'has_interest': True,
+                'interest_rate': '7.40', 'annual_nominal_rate': 63,
+                'total_financial_cost': '9.83',
+                'total_amount': {'value': '1263.10', 'currency': 'ARS'},
+            },
+        },
+        'transactions': [{'auth_data': {
+            'auth_id': '002999', 'ticket': {'number': '11', 'batch': '490'},
+        }}],
+    }
+
+    PAGO_BILLETERA = {
+        'id': 'pay-qr',
+        'payment_code': 'A07135516',
+        'payment_input': 'wallet',
+        'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
+        'payment_method': {'type': 'transfer_payment', 'wallet_name': 'mercado pago'},
+        'wallet': {'name': 'mercado pago'},
+        'transactions': [{'auth_data': {'auth_id': 'O7L8GYKNXZ8'}}],
+    }
+
+    def _nave_cobrar(self, reference, payload, mock_get):
+        self._nave_arm_token()
+        tx = self._nave_make_tx(reference)
+        mock_get.return_value = MagicMock(
+            json=MagicMock(return_value=payload),
+            raise_for_status=MagicMock(return_value=None),
+        )
+        tx._process_notification_data({
+            'payment_id': payload['id'], 'external_payment_id': reference,
+        })
+        return tx
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_38_card_details_are_kept(self, mock_get):
+        """Lo que Nave informa del instrumento deja de perderse."""
+        tx = self._nave_cobrar('TEST-NAVE-DET-001', self.PAGO_CUOTAS, mock_get)
+
+        self.assertEqual(tx.state, 'done')
+        self.assertEqual(tx.nave_card_brand, 'VISA')
+        self.assertEqual(tx.nave_card_type, 'CREDIT')
+        self.assertEqual(tx.nave_card_last4, '0231')
+        self.assertEqual(tx.nave_card_issuer, 'BANCO SANTANDER ARGENTINA S.A.')
+        self.assertEqual(tx.nave_payment_input, 'manual_input')
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_39_receipt_identifiers_are_kept(self, mock_get):
+        """Cupón, autorización y lote son lo que se pide al reclamar una operación."""
+        tx = self._nave_cobrar('TEST-NAVE-DET-002', self.PAGO_CUOTAS, mock_get)
+
+        self.assertEqual(tx.nave_payment_code, 'AYO870166980')
+        self.assertEqual(tx.nave_auth_code, '002999')
+        self.assertEqual(tx.nave_batch, '490')
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_40_financing_is_kept_without_touching_the_sale(self, mock_get):
+        """El cliente pagó más que el monto de la venta, y las dos cifras importan."""
+        tx = self._nave_cobrar('TEST-NAVE-DET-003', self.PAGO_CUOTAS, mock_get)
+
+        self.assertEqual(tx.nave_installments, 3)
+        self.assertTrue(tx.nave_installment_has_interest)
+        self.assertEqual(tx.nave_interest_rate, '7.40')
+        self.assertEqual(tx.nave_annual_nominal_rate, '63')
+        self.assertEqual(tx.nave_total_financial_cost, '9.83')
+        self.assertAlmostEqual(tx.nave_customer_total, 1263.10, places=2)
+        self.assertAlmostEqual(tx.amount, 1500.00, places=2,
+                               msg="El monto de la venta no se toca: es lo que factura el comercio")
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_41_wallet_payment_leaves_card_fields_empty(self, mock_get):
+        """Un cobro por billetera no debe rellenar datos de tarjeta con valores inventados."""
+        tx = self._nave_cobrar('TEST-NAVE-DET-004', self.PAGO_BILLETERA, mock_get)
+
+        self.assertEqual(tx.nave_wallet_name, 'mercado pago')
+        self.assertFalse(tx.nave_card_brand)
+        self.assertFalse(tx.nave_card_last4)
+        self.assertEqual(tx.nave_installments, 0)
+        self.assertFalse(tx.nave_installment_has_interest)
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_42_summary_describes_the_medium_used(self, mock_get):
+        """El resumen deja de afirmar 'Billetera: N/A' en un pago con tarjeta."""
+        con_tarjeta = self._nave_cobrar('TEST-NAVE-DET-005', self.PAGO_CUOTAS, mock_get)
+        self.assertIn('VISA', con_tarjeta.state_message)
+        self.assertIn('0231', con_tarjeta.state_message)
+        self.assertIn('3', con_tarjeta.state_message)
+        self.assertNotIn('illetera', con_tarjeta.state_message)
+
+        con_billetera = self._nave_cobrar('TEST-NAVE-DET-006', self.PAGO_BILLETERA, mock_get)
+        self.assertIn('mercado pago', con_billetera.state_message)
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_43_known_brand_lands_on_the_payment_method(self, mock_get):
+        """La marca va donde Odoo la muestra, no sólo a un campo del módulo."""
+        marca_visa = self.env['payment.method'].with_context(active_test=False).search([
+            ('name', '=ilike', 'visa'),
+            ('primary_payment_method_id.code', '=', 'card'),
+        ], limit=1)
+        self.nave_provider.payment_method_ids = [Command.link(marca_visa.primary_payment_method_id.id)]
+
+        tx = self._nave_cobrar('TEST-NAVE-DET-007', self.PAGO_CUOTAS, mock_get)
+
+        self.assertEqual(tx.payment_method_id, marca_visa,
+                         "El medio de pago de la transacción debe reflejar la marca usada")
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_44_unknown_brand_keeps_the_data(self, mock_get):
+        """Una marca sin equivalente no puede hacer perder el dato ni romper el registro."""
+        payload = dict(self.PAGO_CUOTAS)
+        payload['payment_method'] = dict(self.PAGO_CUOTAS['payment_method'], card_brand='MARCA INEXISTENTE')
+        metodo_previo = self.payment_method_id
+
+        tx = self._nave_cobrar('TEST-NAVE-DET-008', payload, mock_get)
+
+        self.assertEqual(tx.state, 'done')
+        self.assertEqual(tx.nave_card_brand, 'MARCA INEXISTENTE')
+        self.assertEqual(tx.payment_method_id.id, metodo_previo,
+                         "Sin equivalente, el medio de pago queda como estaba")

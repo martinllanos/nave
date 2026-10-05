@@ -325,6 +325,124 @@ class PaymentTransaction(models.Model):
             return False
         return payments[-1].get('payment_id') or False
 
+    def _nave_store_payment_details(self, payment_data):
+        """ Conserva lo que Nave informa del cobro: instrumento, comprobantes y financiación.
+
+        Todo esto llega en la misma verificación que ya se hace para confirmar el estado, así que no
+        cuesta una llamada extra. Antes se descartaba y la única forma de saber con qué pagó alguien
+        era entrar al panel de Nave.
+        """
+        self.ensure_one()
+        metodo = payment_data.get('payment_method') or {}
+        transaccion = (payment_data.get('transactions') or [{}])[0]
+        auth = transaccion.get('auth_data') or {}
+        plan = metodo.get('installment_plan') or {}
+        # La billetera viene en la raíz para QR y dentro del método para algunos flujos.
+        billetera = (payment_data.get('wallet') or {}).get('name') or metodo.get('wallet_name')
+
+        valores = {
+            'nave_card_brand': metodo.get('card_brand') or False,
+            'nave_card_type': metodo.get('card_type') or False,
+            'nave_card_last4': metodo.get('card_last4') or False,
+            'nave_card_issuer': metodo.get('issuer') or False,
+            'nave_payment_input': payment_data.get('payment_input') or False,
+            'nave_wallet_name': billetera or False,
+            'nave_payment_code': payment_data.get('payment_code') or False,
+            'nave_auth_code': auth.get('auth_id') or False,
+            'nave_batch': (auth.get('ticket') or {}).get('batch') or False,
+            'nave_installments': plan.get('installments') or 0,
+            'nave_installment_has_interest': bool(plan.get('has_interest')),
+            'nave_interest_rate': plan.get('interest_rate') or False,
+            'nave_annual_nominal_rate': (
+                str(plan['annual_nominal_rate']) if plan.get('annual_nominal_rate') is not None else False
+            ),
+            'nave_total_financial_cost': plan.get('total_financial_cost') or False,
+            'nave_customer_total': float(((plan.get('total_amount') or {}).get('value')) or 0.0),
+        }
+        self.write(valores)
+        self._nave_apply_card_brand(metodo.get('card_brand'))
+
+    def _nave_apply_card_brand(self, card_brand):
+        """ Refleja la marca en el medio de pago de la transacción.
+
+        Odoo modela las marcas como sub-métodos de `card`, y es donde las muestran sus vistas e
+        informes. Si Nave informa una que el proveedor no tiene vinculada, se deja el medio como
+        estaba: el texto ya quedó guardado, y perder el dato sería peor que no poder clasificarlo.
+        """
+        self.ensure_one()
+        if not card_brand:
+            return
+        marcas = self.provider_id.with_context(active_test=False).payment_method_ids.brand_ids
+        marca = marcas.filtered(lambda m: m.name and m.name.lower() == card_brand.lower())[:1]
+        if marca:
+            self.payment_method_id = marca
+        else:
+            _logger.info(
+                "[payment_nave] La marca '%s' informada por Nave no tiene un método de pago "
+                "equivalente en el proveedor; se conserva sólo como dato de la transacción.",
+                card_brand,
+            )
+
+    def _nave_payment_summary(self, payment_id):
+        """ Describe el cobro según el medio que se usó.
+
+        El texto anterior nombraba siempre la billetera, de modo que un pago con tarjeta quedaba
+        registrado como "Billetera utilizada: N/A": un dato que no informa nada y que hace dudar de
+        si falta o si el pago fue raro.
+        """
+        self.ensure_one()
+        partes = []
+        if self.nave_card_brand or self.nave_card_last4:
+            tarjeta = " ".join(filter(None, [self.nave_card_brand, self.nave_card_type]))
+            if self.nave_card_last4:
+                tarjeta = f"{tarjeta} ****{self.nave_card_last4}".strip()
+            partes.append(_("Tarjeta: %s", tarjeta.strip()))
+        elif self.nave_wallet_name:
+            partes.append(_("Billetera: %s", self.nave_wallet_name))
+
+        if self.nave_installments > 1:
+            cuotas = _("Cuotas: %s", self.nave_installments)
+            if self.nave_customer_total:
+                cuotas = _(
+                    "%(cuotas)s · total pagado por el cliente: %(total)s",
+                    cuotas=cuotas, total=f"{self.nave_customer_total:.2f}",
+                )
+            partes.append(cuotas)
+
+        if self.nave_payment_code:
+            partes.append(_("Cupón: %s", self.nave_payment_code))
+
+        detalle = " · ".join(partes)
+        if detalle:
+            return _("Pago aprobado. %(detalle)s. Nave ID: %(id)s", detalle=detalle, id=payment_id)
+        return _("Pago aprobado. Nave ID: %s", payment_id)
+
+    # ── Datos del cobro informados por Nave ──────────────────────────────────
+    # Nave los devuelve en la verificación de cada pago y antes se descartaban: la única forma de
+    # saber con qué se pagó era entrar a su panel.
+    nave_card_brand = fields.Char(string="Marca de tarjeta", readonly=True)
+    nave_card_type = fields.Char(string="Tipo de tarjeta", readonly=True)
+    nave_card_last4 = fields.Char(string="Últimos 4 dígitos", readonly=True)
+    nave_card_issuer = fields.Char(string="Entidad emisora", readonly=True)
+    nave_payment_input = fields.Char(string="Modo de ingreso", readonly=True)
+    nave_wallet_name = fields.Char(string="Billetera", readonly=True)
+
+    nave_payment_code = fields.Char(string="Código de cupón", readonly=True)
+    nave_auth_code = fields.Char(string="Código de autorización", readonly=True)
+    nave_batch = fields.Char(string="Lote", readonly=True)
+
+    nave_installments = fields.Integer(string="Cuotas", readonly=True)
+    nave_installment_has_interest = fields.Boolean(string="Cuotas con interés", readonly=True)
+    nave_interest_rate = fields.Char(string="Tasa de interés", readonly=True)
+    nave_annual_nominal_rate = fields.Char(string="Tasa nominal anual", readonly=True)
+    nave_total_financial_cost = fields.Char(string="Costo financiero total", readonly=True)
+    nave_customer_total = fields.Monetary(
+        string="Total pagado por el cliente", readonly=True, currency_field='currency_id',
+        help="Importe que efectivamente desembolsó el cliente. En una venta financiada difiere del "
+             "monto de la transacción: el costo financiero lo paga el cliente al emisor y no es un "
+             "ingreso del comercio.",
+    )
+
     def _nave_log_discarded_outcome(self, estado_previo, status_name, payment_id):
         """ Deja constancia cuando una notificación de Nave no pudo aplicarse al estado actual.
 
@@ -433,17 +551,13 @@ class PaymentTransaction(models.Model):
         estado_previo = self.state
 
         if status_name == 'APPROVED':
-            # Extraer información de billetera si está disponible para documentar en el chatter
-            wallet_name = payment_data.get('wallet', {}).get('name', 'N/A')
-            msg = f"Pago Aprobado con éxito. Billetera utilizada: {wallet_name.upper()}. Nave ID: {payment_id}"
+            self._nave_store_payment_details(payment_data)
+            msg = self._nave_payment_summary(payment_id)
             if estado_previo == 'cancel':
                 # Una intención de Nave admite varios intentos: el cliente puede reintentar con otra
                 # tarjeta después de un rechazo. Sin habilitar 'cancel' como origen, esa aprobación
                 # se descarta y queda un cobro real sin registrar.
-                msg = (
-                    f"Pago Aprobado tras un intento rechazado previamente. "
-                    f"Billetera utilizada: {wallet_name.upper()}. Nave ID: {payment_id}"
-                )
+                msg = _("Tras un intento rechazado previamente — %s", msg)
             self._set_done(state_message=msg, extra_allowed_states=('cancel',))
         elif status_name in ['REJECTED', 'CANCELLED']:
             msg = f"Transacción rechazada/cancelada en Nave. Motivo: {reason_code}"
