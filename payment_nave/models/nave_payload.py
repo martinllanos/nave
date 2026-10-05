@@ -27,8 +27,10 @@ def nave_product_entry(env, name, description, quantity, line_total, uom_name=No
     se informaba como 1 × $800 mientras se cobraban $120.
 
     Por eso, cuando la cantidad no es un entero positivo se informa una unidad por el total de la
-    línea, y la cantidad real pasa al frente de la descripción, que es el único campo de texto libre
-    que Nave muestra junto al nombre.
+    línea, y la cantidad real se antepone al nombre. Va en el nombre y no en la descripción porque
+    Nave muestra del detalle sólo `{cantidad}x {nombre}` y el importe: la descripción no se renderiza
+    en ninguna de sus pantallas, así que ahí el dato no le llega a nadie. Se conserva igual en la
+    descripción por si Nave la muestra en el comprobante o en su panel, que no pudimos inspeccionar.
     """
     if float(quantity).is_integer() and quantity >= 1:
         cantidad_enviada = int(quantity)
@@ -38,7 +40,12 @@ def nave_product_entry(env, name, description, quantity, line_total, uom_name=No
         # mandarle a Nave un decimal que rechaza.
         cantidad_enviada = 1
         precio_enviado = line_total
-        description = _con_cantidad_al_frente(env, description, quantity, uom_name)
+        cantidad_real = _cantidad_legible(env, quantity, uom_name)
+        # El cliente leerá "1x 0,15 kg Granel por kilo". El "1x" lo antepone Nave y no se puede
+        # suprimir; es redundante, pero sin la cantidad real leería "1x Granel por kilo" y se
+        # quedaría pensando que compró una unidad.
+        name = f"{cantidad_real} {name}" if name else cantidad_real
+        description = f"{cantidad_real} — {description}" if description else cantidad_real
 
     return {
         'name': (name or 'Ítem')[:NAVE_NAME_MAX_LENGTH],
@@ -51,8 +58,7 @@ def nave_product_entry(env, name, description, quantity, line_total, uom_name=No
     }
 
 
-def _con_cantidad_al_frente(env, description, quantity, uom_name):
-    """ Antepone la cantidad real a la descripción, para que no se pierda al truncar. """
+def _cantidad_legible(env, quantity, uom_name):
+    """ Devuelve la cantidad tal como la lee el cliente, por ejemplo `0,15 kg`. """
     cantidad = formatLang(env, quantity)
-    detalle = f"{cantidad} {uom_name}" if uom_name else cantidad
-    return f"{detalle} — {description}" if description else detalle
+    return f"{cantidad} {uom_name}" if uom_name else cantidad

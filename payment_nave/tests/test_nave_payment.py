@@ -654,6 +654,18 @@ class TestNaveProvider(PaymentCommon):
 
         self.assertEqual(tx.state, 'cancel')
 
+    def _nave_consulto(self, mock_get, request_id):
+        """¿El cron consultó esta intención? Se juzga por las URL con que se lo llamó.
+
+        Importa no preguntar si consultó *a alguien*: el cron barre todas las transacciones Nave
+        pendientes de la base, que es lo que lo hace útil, así que cualquier transacción vieja que
+        haya quedado dando vueltas lo haría consultar. Pasó: una transacción creada a mano para
+        verificar un payload tiró abajo este test cuarenta minutos más tarde.
+        """
+        urls = [str(llamada.args[0]) if llamada.args else str(llamada.kwargs.get('url', ''))
+                for llamada in mock_get.call_args_list]
+        return any(request_id in url for url in urls)
+
     @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
     def test_21_cron_skips_recent_transactions(self, mock_get):
         """No se adelanta al webhook: las transacciones recientes se dejan en paz."""
@@ -662,7 +674,8 @@ class TestNaveProvider(PaymentCommon):
 
         self.env['payment.transaction']._cron_nave_poll_pending_transactions()
 
-        mock_get.assert_not_called()
+        self.assertFalse(self._nave_consulto(mock_get, 'pr-cron-003'),
+                         "El cron no debe consultar una transacción de 5 minutos")
 
     @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
     def test_22_cron_survives_a_failing_transaction(self, mock_get):
@@ -1214,8 +1227,10 @@ class TestNaveProvider(PaymentCommon):
         self.assertEqual(detalle[0]['quantity'], 1)
         self.assertAlmostEqual(float(detalle[0]['unit_price']['value']), tx.amount, delta=0.01,
                                msg="El detalle debe sumar lo mismo que se cobra")
-        self.assertIn('kg', detalle[0]['description'],
-                      "La cantidad real tiene que sobrevivir en la descripción")
+        self.assertTrue(detalle[0]['name'].startswith('0,15 kg'),
+                        f"El cliente lee el nombre, no la descripción: {detalle[0]['name']}")
+        self.assertIn('0,15 kg', detalle[0]['description'],
+                      "Se conserva también en la descripción por si Nave la muestra en otro lado")
 
     def test_48_detalle_mezcla_de_cantidades_suma_el_total(self):
         """Con líneas enteras y fraccionarias mezcladas, el detalle sigue sumando el importe."""
@@ -1424,3 +1439,32 @@ class TestNaveProvider(PaymentCommon):
         self.assertEqual(valores['api_url'], url)
         self.assertEqual(valores['nave_redirect_params'], [])
         self.assertNotIn('type="hidden"', html)
+
+    def test_58_la_cantidad_sobrevive_al_recorte_del_nombre(self):
+        """El nombre se recorta a 100 caracteres: la cantidad va primero para no perderse.
+
+        Nave muestra del detalle sólo `{cantidad}x {nombre}`, así que si el recorte se comiera la
+        cantidad el cliente volvería a leer "1x" sin saber cuánto llevó.
+        """
+        kg = self.env.ref('uom.product_uom_kgm')
+        largo = ('Café de especialidad tostado en origen con descripción deliberadamente extensa '
+                 'para forzar el recorte del nombre en el detalle')
+        self.assertGreater(len(largo), 100)
+        producto = self._nave_producto(largo, 800.0, uom=kg)
+        pedido = self._nave_pedido([(producto, 0.15)])
+
+        detalle = self._nave_tx_de(pedido)._nave_get_products_payload()
+
+        nombre = detalle[0]['name']
+        self.assertTrue(nombre.startswith('0,15 kg'), f"La cantidad se perdió al truncar: {nombre}")
+        self.assertLessEqual(len(nombre), 100)
+
+    def test_59_el_nombre_entero_no_lleva_cantidad(self):
+        """Con cantidad entera Nave ya la muestra: anteponerla sería repetirla dos veces."""
+        producto = self._nave_producto('Producto suelto', 500.0)
+        pedido = self._nave_pedido([(producto, 3)])
+
+        detalle = self._nave_tx_de(pedido)._nave_get_products_payload()
+
+        self.assertEqual(detalle[0]['quantity'], 3)
+        self.assertEqual(detalle[0]['name'], 'Producto suelto')
