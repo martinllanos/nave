@@ -10,6 +10,10 @@
 
 - **Tampoco inferir el ambiente de un `pos_id` por el nombre del dispositivo o del local.** (2026-09-26) Clasifiqué como sandbox una planilla de *Sistema de gestión* porque el dispositivo se llamaba "ONLYONE test": era de **producción**, con un nombre que el usuario había puesto y después cambió a "Be Onlyone". Los nombres los edita el comercio. Lo que define el ambiente es **de dónde sale el id** (Espacio Nave real vs. mail de credenciales sandbox) y **contra qué credenciales responde**. Preguntar el origen antes de clasificar.
 
+- **Una suite verde no dice que el camino esté probado; dice que están probados los tramos que alguien escribió.** (2026-10-05) Con 79 tests en verde, el `payload` verificado contra sandbox y cinco casos de la matriz cerrados, ningún cliente podía pagar en la tienda: el formulario de redirección perdía el identificador de la intención y el checkout quedaba en blanco. Todas las pruebas habían abierto el `checkout_url` directamente, que era justo el tramo que funcionaba, y los dos casos que cubrían el recorrido entero (A0 y A1) estaban sin ejecutar. Los defectos se esconden en las **costuras** —el salto del navegador entre dos sistemas—, que es donde no llega ni un test unitario ni una verificación por API. Recorrer el camino completo, como lo hace el usuario, antes de dar algo por homologado.
+
+- **Los datos que uno commitea para verificar se quedan y rompen los tests después.** (2026-10-05) Una transacción creada con `env.cr.commit()` en la base local para comprobar un `payload` contra sandbox entró, cuarenta minutos más tarde, en el dominio del cron de conciliación y tiró abajo un test que afirma que el cron no toca transacciones recientes. El test asume que no hay ninguna otra transacción Nave pendiente en la base, cosa que en una base de desarrollo no se sostiene. Limpiar lo que se commitea al verificar, y desconfiar de un test que falla justo después de haber tocado datos a mano.
+
 ## ✅ Patrones a Seguir (Best Practices)
 *(Ejemplos: Usar subagentes para la lectura de logs pesados)*
 
