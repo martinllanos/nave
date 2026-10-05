@@ -17,6 +17,7 @@
                            required="code == 'nave' and state != 'disabled'"/>
                     <field name="nave_pos_id" 
                            required="code == 'nave' and state != 'disabled'"/>
+                    <field name="nave_payment_link_pos_id"/>
                 </group>
             </xpath>
         </field>

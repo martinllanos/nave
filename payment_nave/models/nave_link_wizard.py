@@ -168,7 +168,8 @@ class NavePaymentLinkWizard(models.TransientModel):
         # Obtener token (caché automático)
         token = provider._nave_get_access_token()
         base_url = provider._nave_get_api_url()
-        api_endpoint = f"{base_url}/api/payment_request/payment_link"
+        payment_type = 'payment_link'
+        api_endpoint = f"{base_url}/api/payment_request/{payment_type}"
 
         # Duración del link en segundos
         duration_seconds = self.duration_hours * 3600
@@ -183,7 +184,7 @@ class NavePaymentLinkWizard(models.TransientModel):
         payload = {
             'external_payment_id': transaction.reference,
             'seller': {
-                'pos_id': provider.nave_pos_id,
+                'pos_id': provider._nave_get_pos_id(payment_type),
             },
             'transactions': [
                 {
@@ -225,6 +226,7 @@ class NavePaymentLinkWizard(models.TransientModel):
                 "Nave no respondió dentro del tiempo esperado. Por favor intente nuevamente."
             ))
         except requests.exceptions.RequestException as e:
+            provider._nave_log_invalid_pos(e, payment_type, payload['seller']['pos_id'])
             _logger.error("[payment_nave] Error al generar link de pago en Nave: %s", e)
             error_details = str(e)
             if hasattr(e, 'response') and e.response is not None:

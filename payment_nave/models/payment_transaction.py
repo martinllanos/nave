@@ -47,10 +47,12 @@ class PaymentTransaction(models.Model):
         token = self.provider_id._nave_get_access_token()
         base_url = self.provider_id._nave_get_api_url()
 
-        # Determinar si es E-commerce o Link de Pago
-        is_invoice = bool(self.invoice_ids)
-        endpoint = '/api/payment_request/payment_link' if is_invoice else '/api/payment_request/ecommerce'
-        api_url = f"{base_url}{endpoint}"
+        # El medio de cobro define el endpoint y también el pos_id: una factura pagada desde el
+        # portal va por el circuito de link de pago, no por el de la tienda. Sale de una sola
+        # variable para que los dos no puedan quedar desalineados, que es lo que hace que Nave
+        # responda 409 INVALID_POS.
+        payment_type = 'payment_link' if self.invoice_ids else 'ecommerce'
+        api_url = f"{base_url}/api/payment_request/{payment_type}"
 
         # Preparar datos de transacción/productos
         products_data = self._nave_get_products_payload()
@@ -65,7 +67,7 @@ class PaymentTransaction(models.Model):
         payload = {
             'external_payment_id': self.reference,
             'seller': {
-                'pos_id': self.provider_id.nave_pos_id
+                'pos_id': self.provider_id._nave_get_pos_id(payment_type)
             },
             'transactions': [
                 {
@@ -97,6 +99,7 @@ class PaymentTransaction(models.Model):
             response.raise_for_status()
             data = response.json()
         except requests.exceptions.RequestException as e:
+            self.provider_id._nave_log_invalid_pos(e, payment_type, payload['seller']['pos_id'])
             _logger.error("Error al crear intención de pago en Nave: %s", e)
             error_details = str(e)
             if hasattr(e, 'response') and e.response is not None:

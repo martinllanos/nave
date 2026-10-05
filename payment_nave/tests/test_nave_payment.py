@@ -737,3 +737,140 @@ class TestNaveProvider(PaymentCommon):
         self.nave_provider.name = 'Nave Test renombrado'
 
         self.assertTrue(self._nave_has_cached_token())
+
+    # ──────────────────────────────────────────────
+    # 10. POS ID POR MEDIO DE COBRO
+    # ──────────────────────────────────────────────
+
+    def test_29_pos_id_resolves_per_payment_type(self):
+        """Cada medio de cobro tiene su propio identificador ante Nave."""
+        self.nave_provider.nave_payment_link_pos_id = 'pos-link-999'
+
+        self.assertEqual(
+            self.nave_provider._nave_get_pos_id('payment_link'), 'pos-link-999',
+            "El link de pago usa el identificador de su medio",
+        )
+        self.assertEqual(
+            self.nave_provider._nave_get_pos_id('ecommerce'), 'pos-test-uuid-001',
+            "El checkout sigue usando el de la tienda",
+        )
+
+    def test_30_pos_id_falls_back_to_the_store(self):
+        """Sin identificador propio, el link usa el de la tienda.
+
+        Es el estado de las instalaciones configuradas cuando el proveedor admitía uno solo, y el
+        de los comercios a los que Nave entregó el mismo para ambos medios.
+        """
+        self.assertFalse(self.nave_provider.nave_payment_link_pos_id)
+
+        self.assertEqual(
+            self.nave_provider._nave_get_pos_id('payment_link'), 'pos-test-uuid-001')
+        self.assertEqual(
+            self.nave_provider._nave_get_pos_id('ecommerce'), 'pos-test-uuid-001')
+        self.assertEqual(
+            self.nave_provider._nave_get_pos_id(), 'pos-test-uuid-001',
+            "Un medio no declarado también cae a la tienda",
+        )
+
+    @patch('odoo.addons.payment_nave.models.nave_link_wizard.requests.post')
+    def test_31_link_wizard_sends_its_own_pos_id(self, mock_post):
+        """El link viaja con el identificador del medio link de pago, no con el de la tienda."""
+        mock_post.return_value = MagicMock(
+            json=MagicMock(return_value={
+                'id': 'pr-link-031',
+                'checkout_url': 'https://checkout.ranty.io/link/pr-link-031',
+            }),
+            raise_for_status=MagicMock(return_value=None),
+        )
+        self._nave_arm_token()
+        self.nave_provider.nave_payment_link_pos_id = 'pos-link-999'
+
+        wizard = self.env['nave.payment.link.wizard'].create({
+            'provider_id': self.nave_provider.id,
+            'company_id': self.env.company.id,
+            'partner_id': self.partner.id,
+            'amount': 1000.00,
+            'currency_id': self.currency_ars.id,
+            'external_reference': 'INV-2026-0031',
+        })
+        wizard.action_generate_link()
+
+        self.assertEqual(mock_post.call_args[1]['json']['seller']['pos_id'], 'pos-link-999')
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.post')
+    def test_32_checkout_pos_id_follows_the_endpoint(self, mock_post):
+        """Una factura pagada desde el portal va por el circuito de link, y su pos_id también.
+
+        El checkout elige el endpoint `payment_link` cuando la transacción tiene factura. Si el
+        pos_id se quedara en el de la tienda, Nave rechazaría ese pago con 409 INVALID_POS.
+        """
+        def _dispatch(url, **kwargs):
+            return MagicMock(
+                json=MagicMock(return_value={
+                    'id': 'pr-032',
+                    'checkout_url': 'https://checkout.ranty.io/032',
+                }),
+                raise_for_status=MagicMock(return_value=None),
+            )
+        mock_post.side_effect = _dispatch
+        self._nave_arm_token()
+        self.nave_provider.nave_payment_link_pos_id = 'pos-link-999'
+
+        invoice = self.env['account.move'].create({
+            'move_type': 'out_invoice',
+            'partner_id': self.partner.id,
+            'currency_id': self.currency_ars.id,
+            'invoice_line_ids': [Command.create({'name': 'Prueba', 'quantity': 1, 'price_unit': 500.0})],
+        })
+        tx = self.env['payment.transaction'].create({
+            'provider_id': self.nave_provider.id,
+            'payment_method_id': self.payment_method_id,
+            'amount': 500.00,
+            'currency_id': self.currency_ars.id,
+            'reference': 'TEST-NAVE-PORTAL-032',
+            'partner_id': self.partner.id,
+            'operation': 'online_redirect',
+            'invoice_ids': [Command.set([invoice.id])],
+        })
+        tx._get_specific_rendering_values({})
+
+        called_url = mock_post.call_args[0][0]
+        self.assertIn('/payment_request/payment_link', called_url)
+        self.assertEqual(
+            mock_post.call_args[1]['json']['seller']['pos_id'], 'pos-link-999',
+            "El pos_id tiene que acompañar al endpoint elegido",
+        )
+
+    @patch('odoo.addons.payment_nave.models.nave_link_wizard.requests.post')
+    def test_33_invalid_pos_is_logged_with_medium_and_id(self, mock_post):
+        """Un rechazo por identidad deja registrado qué medio y qué identificador se usaron.
+
+        Nave no dice cuál de los configurados está mal, así que sin esos dos datos diagnosticarlo
+        obliga a reproducir el cobro.
+        """
+        response = MagicMock(status_code=409)
+        response.json.return_value = {
+            'code': '409', 'message': 'INVALID_POS',
+            'detail': 'Given POS is for a different payment type',
+        }
+        mock_post.side_effect = requests.exceptions.HTTPError(response=response)
+        self._nave_arm_token()
+        self.nave_provider.nave_payment_link_pos_id = 'pos-link-cruzado'
+
+        wizard = self.env['nave.payment.link.wizard'].create({
+            'provider_id': self.nave_provider.id,
+            'company_id': self.env.company.id,
+            'partner_id': self.partner.id,
+            'amount': 1000.00,
+            'currency_id': self.currency_ars.id,
+            'external_reference': 'INV-2026-0033',
+        })
+
+        from odoo.exceptions import UserError
+        with self.assertLogs('odoo.addons.payment_nave.models.payment_provider', 'ERROR') as logs:
+            with self.assertRaises(UserError):
+                wizard.action_generate_link()
+
+        registrado = "\n".join(logs.output)
+        self.assertIn('payment_link', registrado)
+        self.assertIn('pos-link-cruzado', registrado)

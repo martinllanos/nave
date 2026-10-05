@@ -17,6 +17,13 @@ NAVE_SANDBOX_API_URLS = {
 NAVE_SANDBOX_API_URL = 'https://api-sandbox.ranty.io'
 NAVE_PRODUCTION_API_URL = 'https://api.ranty.io'
 
+# Campo del que sale el `pos_id` de cada medio de cobro online. Nave asigna uno distinto por medio
+# y rechaza con 409 INVALID_POS la intención que llega con el de otro. Un medio ausente de este
+# mapa usa `nave_pos_id`.
+NAVE_POS_ID_FIELDS = {
+    'payment_link': 'nave_payment_link_pos_id',
+}
+
 # Único dominio al que se le permite a un webhook redirigirnos. El payload de Nave no viene
 # firmado, así que la `payment_check_url` que trae es dato no confiable: sin esta restricción,
 # cualquiera que adivine una referencia puede apuntar la verificación a un host propio.
@@ -50,6 +57,14 @@ class PaymentProvider(models.Model):
         string="POS ID (Tienda)",
         required_if_provider='nave',
         help="ID único de la tienda/POS de e-commerce en Nave (obtenido desde Nave > Integraciones)."
+    )
+    nave_payment_link_pos_id = fields.Char(
+        string="POS ID (Link de pago)",
+        help="ID del punto de venta del medio LINK DE PAGO en Nave, para los links generados desde "
+             "facturas y pedidos. Se descarga desde Nave > Integraciones > Sistema de gestión.\n"
+             "Nave asigna un ID distinto por medio de cobro: usar el de la tienda acá hace que la "
+             "API rechace el link con 409 INVALID_POS.\n"
+             "Si se deja vacío se usa el POS ID (Tienda), que es el comportamiento anterior.",
     )
     nave_access_token = fields.Char(
         string="Cached Access Token",
@@ -180,6 +195,44 @@ class PaymentProvider(models.Model):
         if self.code != 'nave':
             return default_codes
         return NAVE_DEFAULT_PAYMENT_METHOD_CODES
+
+    def _nave_log_invalid_pos(self, exc, payment_type, pos_id):
+        """ Deja rastro de qué medio y qué `pos_id` produjeron un rechazo por identidad.
+
+        Nave responde `409 INVALID_POS` — "Given POS is for a different payment type" — sin decir
+        cuál de los identificadores configurados está mal. Sin estos dos datos, diagnosticarlo
+        obliga a reproducir el cobro.
+        """
+        response = getattr(exc, 'response', None)
+        if response is None or response.status_code != 409:
+            return
+        try:
+            code = (response.json() or {}).get('message')
+        except ValueError:
+            code = None
+        if code != 'INVALID_POS':
+            return
+        _logger.error(
+            "[payment_nave] Nave rechazó la intención por identidad: medio '%s', pos_id '%s'. "
+            "Ese pos_id pertenece a otro medio de cobro: revisá la configuración del proveedor.",
+            payment_type, pos_id,
+        )
+
+    def _nave_get_pos_id(self, payment_type=None):
+        """ Devuelve el `pos_id` que corresponde a un medio de cobro de Nave.
+
+        Nave asigna un identificador distinto por medio —tienda de e-commerce, link de pago— y
+        rechaza con `409 INVALID_POS` la intención que llega con el de otro. Los puntos de uso ya
+        saben a qué medio pertenecen, porque eso determina el endpoint, así que piden el `pos_id`
+        declarándolo, igual que piden el host con `_nave_get_api_url`.
+
+        :param str payment_type: tipo de pago de Nave ('ecommerce', 'payment_link').
+        """
+        self.ensure_one()
+        field_name = NAVE_POS_ID_FIELDS.get(payment_type)
+        # El campo propio del medio es opcional: sin él se usa el de la tienda, que es como venían
+        # configuradas las instalaciones cuando el proveedor admitía un solo identificador.
+        return (field_name and self[field_name]) or self.nave_pos_id
 
     def _nave_get_auth_url(self):
         """ Retorna el endpoint de autenticación según el estado del proveedor (Prueba o Producción). """
