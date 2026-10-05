@@ -458,6 +458,88 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.20 A6, A9 y A13 ejecutados: el detalle de productos miente con cantidades fraccionarias (2026-10-05)
+
+Tres cobros de checkout contra sandbox, con ingreso manual de tarjeta. Evidencia del lado del cliente
+en `docs/homologacion/evidencias/<caso>/`.
+
+| Caso | Pedido | Intención | Odoo | Resultado |
+|---|---|---|---|---|
+| A6 | S00018 $10,00 | `FAILURE_PROCESSED` / `REJECTED` | `cancel` | ⚠️ con reparo |
+| A9 | S00019 $123,45 | `SUCCESS_PROCESSED` / `APPROVED` | `done` | ✅ |
+| A13 | S00020 $120,00 (0,15 kg) | `SUCCESS_PROCESSED` / `APPROVED` | `done` | 🔴 defecto |
+
+**A9 cierra el caso de los decimales.** $123,45 viajó como `"123.45"`, volvió aprobado y quedó en el
+asiento `PBNK1/2026/00006` por el mismo importe. Sin redondeos en ningún tramo. Cobrado con NARANJA
+CREDIT ****3355, 1 cuota, cupón `HBZ406310060`.
+
+**A6 verifica el camino de rechazo, pero no el que se buscaba.** Odoo lo llevó a `cancel`, sin asiento
+contable y con el pedido sin confirmar, que es lo que debe pasar. El reparo es el motivo: Nave informó
+`invalid_installment_plan`, no una tarjeta rechazada. Con $10 no hay plan de cuotas posible, así que
+el checkout corta antes de evaluar el plástico. Para un rechazo de tarjeta genuino hay que repetirlo
+eligiendo **1 cuota**, o con un importe que admita financiación.
+
+#### 🔴 A13: el detalle de productos no cuadra con lo que se cobra
+
+Una línea de 0,15 kg a $800/kg se cobró bien —$120,00— pero Nave recibió esto:
+
+```json
+"products": [{"name": "[PRUEBA] Granel por kilo",
+              "quantity": 1,
+              "unit_price": {"currency": "ARS", "value": "800.00"}}],
+"amount": {"currency": "ARS", "value": "120.00"}
+```
+
+**1 × $800,00 no da $120,00.** El cobro sale por `amount`, así que el dinero es correcto, pero el
+detalle que Nave muestra en el checkout y en el comprobante que el cliente descarga dice otra cosa.
+
+La causa es `int(line.product_uom_qty) or 1` (`payment_transaction.py:161`, y su gemelo
+`int(line.quantity) or 1` en `:174` para facturas). Rompe en dos direcciones:
+
+| Cantidad real | Se envía | Detalle que ve el cliente | Se cobra |
+|---|---|---|---|
+| 0,15 kg × $800 | `1` | $800,00 | $120,00 |
+| 2,5 h × $1.000 | `2` | $2.000,00 | $2.500,00 |
+| 1 u × $500 | `1` | $500,00 | $500,00 ✅ |
+
+Alcanza a cualquier venta por peso, por tiempo o por medida: granel, servicios por hora, metros de
+tela, litros. No es un caso de borde del catálogo de prueba.
+
+Queda por resolver en el diseño si Nave acepta decimales en `quantity` —la doc no lo aclara— o si hay
+que mandar `quantity: 1` con el subtotal de la línea como `unit_price` y la cantidad real en la
+descripción.
+
+#### C1 resuelto: la forma de `status` no es la misma en los dos lugares
+
+La respuesta de `GET /api/payment_requests/{id}` trae el estado de la intención como objeto y el de
+cada intento como string plano:
+
+```json
+"status": {"name": "FAILURE_PROCESSED"},
+"payment_attempts": {"attempts": 1,
+                     "payments": [{"payment_id": "07e8d666-…", "status": "REJECTED"}]}
+```
+
+La suposición del código (`payment_nave.js:124`: *"suponiendo estructura {status:{name:...}}"*) es
+**correcta para la intención** y **equivocada para los intentos**. Hoy no nos afecta porque
+`_nave_extract_payment_id` sólo lee `payment_id` de ahí, pero quien escriba
+`payments[-1]['status']['name']` se lleva un `AttributeError`. Pasó al escribir el script de
+diagnóstico de esta misma corrida.
+
+Claves de la raíz, por si sirven más adelante: `additional_info`, `amount_type`, `application`,
+`application_id`, `buyer`, `capture_data`, `creation_date`, `expiration_date`, `external_payment_id`,
+`id`, `payment`, `payment_attempts`, `payment_gateway`, `payment_retries_allowed`, `payment_type`,
+`platform`, `seller`, `shipping`, `status`, `transactions`.
+
+#### Lo que confirman las capturas
+
+Con el pago aprobado, el checkout ofrece **"Descargar el comprobante"** y **"Volver a la tienda"**.
+Ese segundo botón existe porque el checkout manda `additional_info.callback_url`, y es exactamente lo
+que le falta al wizard del link de pago (B7c): el cliente que paga una factura no tiene cómo volver.
+
+Con el pago rechazado, la única salida es **"Volver a intentar"**: no hay retorno a la tienda ni
+siquiera con `callback_url` presente. Quien abandona ahí se queda en el sitio de Nave.
+
 ### 3.19 A8 verificado: la intención expira y el cron la cierra sola (2026-10-05)
 
 Tres intenciones de checkout creadas a las 17:07 UTC quedaron sin pagar. A las 17:57 UTC —exactamente
@@ -1123,10 +1205,10 @@ deciden cómo se escribe el fix de B11.
 | A3 | Pago aprobado con Visa 1 cuota | `4025 2200 0000 0139` | Ídem A2 | ⬜ |
 | A4 | Pago aprobado con Visa 6 cuotas | `4761 2299 9900 0231` | Ídem A2 + verificar que el plan de cuotas queda registrado | ⬜ |
 | A5 | Rechazo por fondos | `4025 2200 0000 0127` | tx → `cancel` con el `reason_code` de Nave en el chatter | ⬜ |
-| A6 | Rechazo Naranja | `5895 6248 9347 1379` | Ídem A5 | ⬜ |
+| A6 | Rechazo Naranja | `5895 6248 9347 1379` | Ídem A5 | ⚠️ 2026-10-05: el camino de rechazo quedó verificado (`REJECTED` → `cancel`, sin asiento, pedido sin confirmar), pero Nave lo rechazó por `invalid_installment_plan`, no por la tarjeta. Repetir con 1 cuota para un rechazo de plástico genuino. §3.20 |
 | A7 | Abandono del checkout | Llegar a Nave y cerrar la pestaña | tx queda `draft`/`pending`, el pedido no se confirma, sin asientos | ⬜ |
 | A8 | Expiración de la intención | Crear intención y esperar los 3000 s del `duration_time` hardcodeado (`payment_transaction.py:85`) | Nave marca `EXPIRED` y el cron de conciliación deja la transacción en Cancelado con el motivo a la vista | ✅ 2026-10-05, §3.19 |
-| A9 | Monto con decimales | Pedido por $1.234,56 | `amount.value == "1234.56"` (string, 2 decimales) en el payload | ⬜ |
+| A9 | Monto con decimales | Pedido por $123,45 (tope de homologación) | `amount.value == "123.45"` (string, 2 decimales) en el payload | ✅ 2026-10-05, S00019: $123,45 exacto hasta el asiento contable, sin redondeos. §3.20 |
 | A10 | Cliente sin CUIT ni email | Partner incompleto | Se envían los defaults `'00000000'` / `'correo@temporal.com'` (`payment_transaction.py:199,205`). Confirmar que Nave los acepta | ⬜ |
 | A11 | CUIT con guiones | Partner con `20-05536168-2` | El módulo no limpia guiones (`:196-200`). Verificar si Nave lo rechaza | ⬜ |
 | A12 | Descuadre productos vs total | Pedido con IVA | Los `products[]` van **sin IVA** (`price_reduce_taxexcl`, `:157`) pero `amount` **con** IVA. Confirmar que Nave no valida la suma | ⬜ |
@@ -1135,7 +1217,7 @@ deciden cómo se escribe el fix de B11.
 | A17 | Rechazo tardío sobre un cobro aprobado | Simular la llegada de un webhook `REJECTED` después de uno `APPROVED` | La transacción sigue en `done` y conserva el `payment_id` del pago aprobado. Queda advertencia en el log | ⬜ |
 | A14 | Devolución total desde backend 🔴 | Factura pagada → botón Reembolsar | `DELETE /api/payments/{id}` → `CANCELLING`, tx hija creada. Odoo **no debe ofrecer monto parcial** (`full_only`, N10). 🚫 Hoy el botón no existe (B6) | ⬜ |
 | A15 | Cierre del ciclo de devolución 🔴 | Tras A14, esperar el webhook `REFUNDED` | La transacción y la factura reflejan la devolución. 🚫 Hoy el webhook **no cambia nada** (B6.4) | ⬜ |
-| A13 | Cantidad fraccionaria | Línea con qty 0,5 | `int(qty) or 1` → se envía 1 (`:151`). Verificar impacto | ⬜ |
+| A13 | Cantidad fraccionaria | Línea con qty 0,15 kg × $800 | `int(qty) or 1` → se envía 1 (`:161`). Verificar impacto | 🔴 2026-10-05, S00020: **el detalle no cuadra con el cobro**. Nave recibió `quantity: 1 × $800,00` y cobró $120,00. §3.20 |
 
 ### Bloque B — Link de pago
 
@@ -1161,7 +1243,7 @@ deciden cómo se escribe el fix de B11.
 | ID | Caso | Pasos | Resultado esperado | Estado |
 |---|---|---|---|---|
 | C0 | Ruteo a la terminal correcta 🔴 | Lanzar un cobro con el `pos_id` actual | El cobro **aparece en la terminal `L40000978`**. Si no aparece, el `pos_id` es el de e-commerce (§3.5) y hay que pedirle a Nave el de la terminal | ⬜ |
-| C1 | Contrato de estados 🔴 | Cobrar y capturar la respuesta cruda de `GET /api/payment_requests/{id}` | Documentar la forma exacta de `status` y el catálogo completo de valores. **Todo el polling depende de una suposición del código** (`payment_nave.js:124`: *"suponiendo estructura {status:{name:...}}"*) | ⬜ |
+| C1 | Contrato de estados 🔴 | Cobrar y capturar la respuesta cruda de `GET /api/payment_requests/{id}` | Documentar la forma exacta de `status` y el catálogo completo de valores. **Todo el polling depende de una suposición del código** (`payment_nave.js:124`: *"suponiendo estructura {status:{name:...}}"*) | ✅ 2026-10-05: forma capturada en §3.20. La suposición es correcta en la intención, pero **no** dentro de `payment_attempts` |
 | C2 | Cobro aprobado con chip | Orden POS → Tarjeta → insertar chip → aprobar | Línea `done`, orden validada, `transaction_id` guardado | ⬜ |
 | C3 | Cobro rechazado | Tarjeta de rechazo en la terminal | Diálogo con el `reason_code`, línea en `retry`, el cajero puede reintentar | ⬜ |
 | C4 | Cancelación desde Odoo | Iniciar cobro → botón Cancel | `DELETE` a Nave y la **terminal vuelve a reposo**. Ojo: `send_payment_cancel` retorna `true` siempre, incluso si el DELETE falló (`payment_nave.js:185-190`) | ⬜ |
