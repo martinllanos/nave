@@ -17,11 +17,13 @@ Nave rechaza las cantidades fraccionarias y no valida que el detalle cuadre con 
 una línea con cantidad no entera DEBE informarse de una forma que preserve esa correspondencia en
 lugar de enviar la cantidad truncada junto al precio unitario original.
 
+Cuando la cantidad informada no sea la real, la cantidad real DEBE quedar donde el cliente la lee.
+
 #### Scenario: Línea con cantidad fraccionaria
 
 - **WHEN** se genera una intención para una línea de 0,15 kg a $800,00 por kilo, que se cobra $120,00
 - **THEN** el detalle informa un importe de $120,00 para esa línea
-- **AND** la cantidad real queda indicada en la descripción de la línea
+- **AND** el cliente puede leer que la línea es de 0,15 kg
 - **AND** el importe cobrado sigue siendo $120,00
 
 #### Scenario: Línea con cantidad entera
