@@ -452,6 +452,41 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.18 El checkout recibe los datos de tarjeta y cuotas, y los descarta (2026-10-05)
+
+Verificado consultando el pago de `S00007` ($1.150, caso A4) contra la API. La respuesta de
+`GET /ranty-payments/payments/{id}` para un cobro **online** trae lo mismo que la de Nave Point:
+
+```json
+"card_brand": "VISA", "card_type": "CREDIT", "card_last4": "0231",
+"issuer": "BANCO SANTANDER ARGENTINA S.A.", "payment_code": "AYO870166980",
+"payment_input": "manual_input",
+"installment_plan": {
+  "name": "CUOTA SIMPLE 3", "installments": 3, "has_interest": true,
+  "interest_rate": "7.40", "annual_nominal_rate": 63, "total_financial_cost": "9.83",
+  "total_amount": {"value": "1263.10", "currency": "ARS"}
+},
+"auth_data": {"auth_id": "002999", "ticket": {"number": "11", "batch": "490"}}
+```
+
+**`payment_nave` descarta todo eso.** Sólo guarda `nave_payment_id` y, en el chatter, la billetera
+—que en un pago con tarjeta viene `N/A`—. `pos_nave` sí lo extrae para el ticket desde `18.0.1.4.0`.
+
+**El dato que más pesa: el cliente pagó $1.263,10, no $1.150.** Eligió 3 cuotas con interés
+(7,40%, CFT 9,83%), así que el total financiado difiere del monto de la venta. Nuestra
+`payment.transaction` registra 1.150, que es correcto desde la óptica del comercio, pero **en Odoo
+no queda rastro de que el cliente pagó en cuotas ni de cuánto**.
+
+Dos consecuencias:
+
+1. **Para la homologación**: si Nave pide ver marca, últimos cuatro, cupón, lote y plan de cuotas en
+   el flujo online —como se presume que los pedirá en el presencial—, hoy no los tenemos.
+2. **Para la operación**: ante un reclamo, no se puede responder con qué tarjeta ni en cuántas
+   cuotas pagó el cliente sin entrar al panel de Nave.
+
+Nota al margen: el caso A4 se ejecutó con la tarjeta rotulada "6 cuotas" en la documentación, pero
+el plan aplicado fue de **3**. El plan lo elige el pagador en el checkout, no la tarjeta.
+
 ### 3.17 🔴 El proveedor de producción tiene credenciales de sandbox (2026-10-05)
 
 Verificado probando las credenciales cargadas contra los dos endpoints de autenticación, desde el

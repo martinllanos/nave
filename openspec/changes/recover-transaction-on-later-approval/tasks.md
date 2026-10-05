@@ -28,8 +28,8 @@
 - [x] 3.2 Correr la suite completa de `payment_nave` y `pos_nave`, más flake8 y bandit según
       `.agent/rules.md` §6. Verificar: 0 fallos, 0 errores de lint y 0 hallazgos de severidad media o
       superior.
-- [ ] 3.3 Reproducir el caso contra sandbox: pagar con una tarjeta de rechazo y reintentar con una
+- [x] 3.3 Reproducir el caso contra sandbox: pagar con una tarjeta de rechazo y reintentar con una
       aprobada sobre la misma intención. Verificar: la transacción termina en `done`, el pedido se
       confirma, y el chatter muestra el rechazo y la recuperación en orden.
-- [ ] 3.4 Resolver a mano la transacción `S00005`, que quedó en `cancel` con un cobro real asociado.
+- [x] 3.4 Resolver a mano la transacción `S00005`, que quedó en `cancel` con un cobro real asociado.
       Verificar: queda registrada como pagada o devuelta, con constancia de la decisión tomada.
