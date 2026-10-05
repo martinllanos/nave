@@ -899,3 +899,94 @@ class TestNaveProvider(PaymentCommon):
         # Un error ajeno no debe registrarse como problema de identidad.
         otro = _error(400, {'code': 'not_found', 'message': 'Payment request not found'})
         provider._nave_log_invalid_pos(otro, 'payment_link', 'pos-x')
+
+    # ──────────────────────────────────────────────
+    # 11. VARIOS INTENTOS SOBRE LA MISMA INTENCIÓN
+    # ──────────────────────────────────────────────
+
+    def _nave_verificacion(self, status_name, reason_code='transaction_successful', payment_id='pay-x'):
+        return MagicMock(
+            json=MagicMock(return_value={
+                'id': payment_id,
+                'status': {'name': status_name, 'reason_code': reason_code},
+            }),
+            raise_for_status=MagicMock(return_value=None),
+        )
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_35_approval_after_rejection_recovers_the_transaction(self, mock_get):
+        """El cliente reintenta con otra tarjeta y el cobro prospera: hay que registrarlo.
+
+        Una intención de Nave admite varios intentos. Descartar la aprobación posterior deja dinero
+        cobrado sin registrar, que es lo que ocurrió con el pedido S00005.
+        """
+        self._nave_arm_token()
+        tx = self._nave_make_tx('TEST-NAVE-RETRY-001')
+
+        # Primer intento: rechazado.
+        mock_get.return_value = self._nave_verificacion('REJECTED', 'no_amount_available', 'pay-rechazado')
+        tx._process_notification_data({
+            'payment_id': 'pay-rechazado', 'external_payment_id': 'TEST-NAVE-RETRY-001',
+        })
+        self.assertEqual(tx.state, 'cancel')
+
+        # Segundo intento sobre la misma intención: aprobado.
+        mock_get.return_value = self._nave_verificacion('APPROVED', payment_id='pay-aprobado')
+        tx._process_notification_data({
+            'payment_id': 'pay-aprobado', 'external_payment_id': 'TEST-NAVE-RETRY-001',
+        })
+
+        self.assertEqual(tx.state, 'done', "La aprobación posterior debe recuperar la transacción")
+        self.assertEqual(tx.nave_payment_id, 'pay-aprobado',
+                         "Debe quedar asociada al pago aprobado, no al rechazado")
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_36_recovery_is_visible_in_the_document(self, mock_get):
+        """Un cobro recuperado se distingue de uno directo: la diferencia le importa a quien concilia."""
+        self._nave_arm_token()
+
+        directo = self._nave_make_tx('TEST-NAVE-RETRY-002')
+        mock_get.return_value = self._nave_verificacion('APPROVED', payment_id='pay-directo')
+        directo._process_notification_data({
+            'payment_id': 'pay-directo', 'external_payment_id': 'TEST-NAVE-RETRY-002',
+        })
+        self.assertNotIn('rechazado', directo.state_message or '')
+
+        recuperada = self._nave_make_tx('TEST-NAVE-RETRY-003')
+        mock_get.return_value = self._nave_verificacion('REJECTED', 'denied', 'pay-r')
+        recuperada._process_notification_data({
+            'payment_id': 'pay-r', 'external_payment_id': 'TEST-NAVE-RETRY-003',
+        })
+        mock_get.return_value = self._nave_verificacion('APPROVED', payment_id='pay-ok')
+        recuperada._process_notification_data({
+            'payment_id': 'pay-ok', 'external_payment_id': 'TEST-NAVE-RETRY-003',
+        })
+
+        self.assertEqual(recuperada.state, 'done')
+        self.assertIn('rechazado', recuperada.state_message,
+                      "El mensaje debe decir que hubo un intento rechazado antes")
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_37_late_rejection_does_not_revert_a_paid_transaction(self, mock_get):
+        """Los reintentos de Nave duran horas: un rechazo puede llegar después de una aprobación."""
+        self._nave_arm_token()
+        tx = self._nave_make_tx('TEST-NAVE-RETRY-004')
+
+        mock_get.return_value = self._nave_verificacion('APPROVED', payment_id='pay-ok')
+        tx._process_notification_data({
+            'payment_id': 'pay-ok', 'external_payment_id': 'TEST-NAVE-RETRY-004',
+        })
+        self.assertEqual(tx.state, 'done')
+
+        mock_get.return_value = self._nave_verificacion('REJECTED', 'denied', 'pay-viejo')
+        with self.assertLogs('odoo.addons.payment_nave.models.payment_transaction', 'WARNING') as logs:
+            tx._process_notification_data({
+                'payment_id': 'pay-viejo', 'external_payment_id': 'TEST-NAVE-RETRY-004',
+            })
+
+        self.assertEqual(tx.state, 'done', "Un rechazo tardío no puede revertir un cobro")
+        self.assertEqual(tx.nave_payment_id, 'pay-ok',
+                         "Debe seguir apuntando al pago aprobado, no al rechazado tardío")
+        registrado = "\n".join(logs.output)
+        self.assertIn('TEST-NAVE-RETRY-004', registrado)
+        self.assertIn('REJECTED', registrado)

@@ -325,6 +325,25 @@ class PaymentTransaction(models.Model):
             return False
         return payments[-1].get('payment_id') or False
 
+    def _nave_log_discarded_outcome(self, estado_previo, status_name, payment_id):
+        """ Deja constancia cuando una notificación de Nave no pudo aplicarse al estado actual.
+
+        El modelo base descarta una transición no permitida registrando sólo un warning genérico en
+        el log de Odoo. Eso fue lo único que quedó de un cobro aprobado que no se registró, en un
+        archivo que nadie mira. Acá se nombra la referencia, el desenlace que informó Nave y el
+        estado que quedó, que es lo que permite encontrarlo.
+        """
+        self.ensure_one()
+        if self.state != estado_previo:
+            return  # La notificación se aplicó: no hay nada que advertir.
+        if status_name == 'PENDING' and estado_previo == 'pending':
+            return  # Reiteración del mismo estado, no un desenlace descartado.
+        _logger.warning(
+            "[payment_nave] La transacción %s quedó en '%s' y no pudo tomar el desenlace '%s' "
+            "que informó Nave (pago %s). Revisá si corresponde resolverla a mano.",
+            self.reference, estado_previo, status_name, payment_id,
+        )
+
     def _nave_get_check_url(self, payment_id, notification_data):
         """ URL contra la que se verifica el estado real del pago.
 
@@ -378,7 +397,11 @@ class PaymentTransaction(models.Model):
         if not payment_id:
             raise ValidationError("Nave: No se recibió 'payment_id' en el webhook.")
 
-        self.nave_payment_id = payment_id
+        # El `payment_id` del pago cuyo desenlace se aplique se guarda recién al final: una
+        # intención admite varios intentos, y escribirlo antes dejaría la transacción apuntando al
+        # último pago notificado aunque su desenlace se haya descartado. Eso fue lo que pasó con el
+        # pedido S00005, que quedó cancelado con el identificador del pago aprobado encima.
+        payment_id_previo = self.nave_payment_id
 
         # GET seguro para comprobar el estado real de la transacción
         token = self.provider_id._nave_get_access_token()
@@ -407,11 +430,21 @@ class PaymentTransaction(models.Model):
 
         _logger.info("Resultado de verificación en Nave para %s: %s (%s)", self.reference, status_name, reason_code)
 
+        estado_previo = self.state
+
         if status_name == 'APPROVED':
             # Extraer información de billetera si está disponible para documentar en el chatter
             wallet_name = payment_data.get('wallet', {}).get('name', 'N/A')
             msg = f"Pago Aprobado con éxito. Billetera utilizada: {wallet_name.upper()}. Nave ID: {payment_id}"
-            self._set_done(state_message=msg)
+            if estado_previo == 'cancel':
+                # Una intención de Nave admite varios intentos: el cliente puede reintentar con otra
+                # tarjeta después de un rechazo. Sin habilitar 'cancel' como origen, esa aprobación
+                # se descarta y queda un cobro real sin registrar.
+                msg = (
+                    f"Pago Aprobado tras un intento rechazado previamente. "
+                    f"Billetera utilizada: {wallet_name.upper()}. Nave ID: {payment_id}"
+                )
+            self._set_done(state_message=msg, extra_allowed_states=('cancel',))
         elif status_name in ['REJECTED', 'CANCELLED']:
             msg = f"Transacción rechazada/cancelada en Nave. Motivo: {reason_code}"
             self._set_canceled(state_message=msg)
@@ -422,6 +455,13 @@ class PaymentTransaction(models.Model):
             self._set_canceled(state_message=_("El pago fue reembolsado o reversado en Nave."))
         else:
             self._set_error(_("Estado desconocido devuelto por Nave: %s", status_name))
+
+        # Sólo queda asociado el pago cuyo desenlace efectivamente se aplicó. Si no había ninguno,
+        # se guarda igual para no perder la trazabilidad del primer intento.
+        if self.state != estado_previo or not payment_id_previo:
+            self.nave_payment_id = payment_id
+
+        self._nave_log_discarded_outcome(estado_previo, status_name, payment_id)
 
     # ==========================================
     # 4. REEMBOLSOS / ANULACIONES AUTOMÁTICAS
