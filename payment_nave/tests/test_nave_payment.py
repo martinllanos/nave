@@ -1125,3 +1125,26 @@ class TestNaveProvider(PaymentCommon):
         self.assertEqual(tx.nave_card_brand, 'MARCA INEXISTENTE')
         self.assertEqual(tx.payment_method_id.id, metodo_previo,
                          "Sin equivalente, el medio de pago queda como estaba")
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_45_repeated_notification_does_not_warn(self, mock_get):
+        """Nave reintenta cada webhook hasta cinco veces: el mismo desenlace llega varias veces.
+
+        Advertir por eso llenaría el log de avisos que no requieren nada, y una advertencia que
+        salta cuando no pasa nada termina haciendo que se ignoren las que sí importan.
+        """
+        import logging
+        self._nave_arm_token()
+        tx = self._nave_make_tx('TEST-NAVE-REPEAT-001')
+
+        mock_get.return_value = self._nave_verificacion('APPROVED', payment_id='pay-ok')
+        datos = {'payment_id': 'pay-ok', 'external_payment_id': 'TEST-NAVE-REPEAT-001'}
+        tx._process_notification_data(datos)
+        self.assertEqual(tx.state, 'done')
+
+        logger = logging.getLogger('odoo.addons.payment_nave.models.payment_transaction')
+        with self.assertNoLogs(logger, 'WARNING'):
+            tx._process_notification_data(datos)
+
+        self.assertEqual(tx.state, 'done')
+        self.assertEqual(tx.nave_payment_id, 'pay-ok')

@@ -443,6 +443,17 @@ class PaymentTransaction(models.Model):
              "ingreso del comercio.",
     )
 
+    # Estado al que lleva cada desenlace que informa Nave, para distinguir una notificación
+    # descartada de una repetida.
+    NAVE_ESTADO_POR_DESENLACE = {
+        'APPROVED': 'done',
+        'REJECTED': 'cancel',
+        'CANCELLED': 'cancel',
+        'REFUNDED': 'cancel',
+        'PURCHASE_REVERSED': 'cancel',
+        'PENDING': 'pending',
+    }
+
     def _nave_log_discarded_outcome(self, estado_previo, status_name, payment_id):
         """ Deja constancia cuando una notificación de Nave no pudo aplicarse al estado actual.
 
@@ -454,8 +465,12 @@ class PaymentTransaction(models.Model):
         self.ensure_one()
         if self.state != estado_previo:
             return  # La notificación se aplicó: no hay nada que advertir.
-        if status_name == 'PENDING' and estado_previo == 'pending':
-            return  # Reiteración del mismo estado, no un desenlace descartado.
+        if self.NAVE_ESTADO_POR_DESENLACE.get(status_name) == estado_previo:
+            # El desenlace es el que la transacción ya tenía: es un reintento de Nave, que repite
+            # cada webhook hasta cinco veces. Advertir por esto llenaría el log de avisos que no
+            # requieren nada, y una advertencia que salta cuando no pasa nada termina haciendo que
+            # se ignoren las que sí importan.
+            return
         _logger.warning(
             "[payment_nave] La transacción %s quedó en '%s' y no pudo tomar el desenlace '%s' "
             "que informó Nave (pago %s). Revisá si corresponde resolverla a mano.",
