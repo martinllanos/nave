@@ -458,6 +458,48 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.21 A6 cerrado y el endpoint de devolución ubicado (2026-10-05)
+
+**A6 con un importe que admite cuotas.** El primer intento de A6 se rechazó por
+`invalid_installment_plan` con $10: no hay plan de cuotas posible para ese monto, así que el checkout
+cortaba antes de evaluar el plástico. Repetido con $1.150 (`S00024`) y la misma tarjeta de rechazo,
+Nave respondió lo que se buscaba:
+
+```
+pantalla  → "La tarjeta con la que intentaste pagar no tiene el dinero necesario"
+intención → FAILURE_PROCESSED / REJECTED
+Odoo      → cancel | motivo: no_amount_available | 0 asientos | pedido sin confirmar
+```
+
+El camino de rechazo queda verificado de punta a punta con un rechazo de tarjeta real: no se
+contabiliza nada y el pedido no se confirma.
+
+#### El endpoint de devolución existe; falta el permiso
+
+El sondeo distingue tres respuestas del gateway, lo que permite afirmar algo que antes era
+suposición. Las tres con el mismo bearer token válido:
+
+| Petición | Respuesta |
+|---|---|
+| `GET /api/ruta_que_no_existe_jamas` | `403 {"message": "Invalid key=value pair…"}` |
+| `DELETE /api/ruta_que_no_existe_jamas` | `403 {"message": "Invalid key=value pair…"}` |
+| `GET /api/payments/{uuid inexistente}` | `404 {"code": "INVALID_PAYMENT"}` |
+| **`DELETE /api/payments/{uuid inexistente}`** | **`403 {"Message": "User is not authorized to access this resource because no identity-based policy allows the execute-api:Invoke"}`** |
+| `DELETE /api/payment_request/{uuid}` | `403 {"message": "Invalid key=value pair…"}` |
+
+Una ruta que el gateway no mapea devuelve *"Invalid key=value pair"*. El DELETE sobre
+`/api/payments/{id}` devuelve otro mensaje distinto, el de IAM: **la ruta está mapeada y el llamador
+no tiene permiso**. Si no existiera, devolvería el primero.
+
+O sea que `DELETE /api/payments/{payment_id}` —el que usa `_send_refund_request`— sigue siendo la
+ruta correcta, y lo que hay que pedirle a Nave es que habilite ese método para nuestro `client_id`,
+no que nos diga cuál es el endpoint. B2, B6 y D5 siguen bloqueadas, pero por un permiso identificado.
+
+Se probaron además `POST /api/payments/{id}/refund` y `POST /ranty-payments/payments/{id}/refunds`
+por si la devolución se hubiera mudado: las dos devuelven el mensaje de ruta no mapeada.
+
+Ninguna de estas pruebas devolvió dinero: todas se hicieron contra un `payment_id` inexistente.
+
 ### 3.20 A6, A9 y A13 ejecutados: el detalle de productos miente con cantidades fraccionarias (2026-10-05)
 
 Tres cobros de checkout contra sandbox, con ingreso manual de tarjeta. Evidencia del lado del cliente
@@ -1220,7 +1262,7 @@ deciden cómo se escribe el fix de B11.
 | A3 | Pago aprobado con Visa 1 cuota | `4025 2200 0000 0139` | Ídem A2 | ⬜ |
 | A4 | Pago aprobado con Visa 6 cuotas | `4761 2299 9900 0231` | Ídem A2 + verificar que el plan de cuotas queda registrado | ⬜ |
 | A5 | Rechazo por fondos | `4025 2200 0000 0127` | tx → `cancel` con el `reason_code` de Nave en el chatter | ⬜ |
-| A6 | Rechazo Naranja | `5895 6248 9347 1379` | Ídem A5 | ⚠️ 2026-10-05: el camino de rechazo quedó verificado (`REJECTED` → `cancel`, sin asiento, pedido sin confirmar), pero Nave lo rechazó por `invalid_installment_plan`, no por la tarjeta. Repetir con 1 cuota para un rechazo de plástico genuino. §3.20 |
+| A6 | Rechazo Naranja | `5895 6248 9347 1379` | Ídem A5 | ✅ 2026-10-05, S00024 ($1.150): rechazo de tarjeta genuino (`no_amount_available`) → `cancel`, sin asiento, pedido sin confirmar. §3.21 |
 | A7 | Abandono del checkout | Llegar a Nave y cerrar la pestaña | tx queda `draft`/`pending`, el pedido no se confirma, sin asientos | ⬜ |
 | A8 | Expiración de la intención | Crear intención y esperar los 3000 s del `duration_time` hardcodeado (`payment_transaction.py:85`) | Nave marca `EXPIRED` y el cron de conciliación deja la transacción en Cancelado con el motivo a la vista | ✅ 2026-10-05, §3.19 |
 | A9 | Monto con decimales | Pedido por $123,45 (tope de homologación) | `amount.value == "123.45"` (string, 2 decimales) en el payload | ✅ 2026-10-05, S00019: $123,45 exacto hasta el asiento contable, sin redondeos. §3.20 |
@@ -1409,11 +1451,15 @@ Estructura sugerida: `evidencias/<ID_caso>/` con `pantalla.mp4|png`, `odoo.log`,
 - **N7** — ¿Hay rate limit de API, límite de monto o límite de intenciones concurrentes?
 - **N8** ✅ **RESUELTA (2026-09-21)** — Trámite hecho. Una sola `notification_url`
   (`https://www.onlyone.ar/payment/nave/webhook`) sirve para ambos ambientes.
-- **N12** 🔴 **NUEVA (2026-09-22)** — **¿Cómo se dispara una devolución por API?** El endpoint
-  `DELETE /api/payments/{payment_id}` que usa nuestro código **ya no aparece en ninguna de las cuatro
-  páginas** de la documentación vigente (verificado: cero ocurrencias de `api/payments/`). Los estados
-  `REFUNDED` y `CANCELLED` siguen existiendo, así que la devolución existe. ¿Sigue vigente ese
-  endpoint, se mueve a otro, o las devoluciones se hacen sólo desde el panel? **Bloquea B6 y D5.**
+- **N12** 🟠 **ACOTADA (2026-10-05)** — **El endpoint de devolución existe; lo que falta es el
+  permiso.** Ya no hay que preguntar si la ruta sigue viva: el sondeo contra sandbox la distingue de
+  una inexistente (§3.21). `DELETE /api/payments/{payment_id}` responde *"User is not authorized to
+  access this resource"*, el mensaje de IAM que devuelve el gateway cuando la ruta está mapeada pero
+  el llamador no tiene permiso, mientras que una ruta inventada devuelve otro mensaje distinto.
+  La pregunta a Nave pasa a ser concreta: **habilitar `execute-api:Invoke` del método DELETE sobre
+  `/api/payments/{id}` para nuestro `client_id`**. Sigue bloqueando B6 y D5, pero ya no por
+  desconocimiento. El endpoint no figura en la documentación vigente (cero ocurrencias de
+  `api/payments/` en las cuatro páginas), así que conviene pedir también que lo documenten.
 - **N10** ✅ **RESUELTA (2026-09-21)** — **No existe la devolución parcial: es `full_only`.** La
   mención "total o parcial" de `doc_point.md` §7 es un error de la doc. Ver §3.8 para el cambio que
   implica.
