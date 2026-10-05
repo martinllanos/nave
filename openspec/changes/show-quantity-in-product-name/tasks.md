@@ -28,6 +28,6 @@
 - [x] 3.1 Subir la versión del módulo. Verificar: el manifiesto declara la versión nueva.
 - [x] 3.2 Correr la suite de `payment_nave` y `pos_nave`, más flake8 y bandit según `.agent/rules.md`
       §6. Verificar: 0 fallos, 0 errores de lint y 0 hallazgos de severidad media o superior.
-- [ ] 3.3 Desplegar y abrir en el navegador el checkout de una compra con cantidad fraccionaria.
+- [x] 3.3 Desplegar y abrir en el navegador el checkout de una compra con cantidad fraccionaria.
       Verificar: la pantalla de Nave muestra la cantidad real en la línea, y queda registrado en el
       plan de homologación con la captura.

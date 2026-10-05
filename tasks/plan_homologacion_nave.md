@@ -458,6 +458,59 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.24 El link de pago está bloqueado en sandbox por el `pos_id` (2026-10-05)
+
+Primer intento de generar un link de pago desde un pedido de venta del backend, con el wizard tal
+como lo abre la vista. Nave lo rechaza:
+
+```
+POST /api/payment_request/payment_link  → 400 {"code": "invalid_pos",
+                                               "message": "Given POS is for a different payment type"}
+POST /api/payment_request/ecommerce     → 200 OK   (el mismo pos_id)
+```
+
+El proveedor de sandbox tiene un solo `pos_id`, el de tienda (`f71ba756-…`), y
+`nave_payment_link_pos_id` está vacío, así que el wizard cae al de tienda —el comportamiento previsto
+para no romper instalaciones viejas— y Nave lo rechaza porque asigna un identificador distinto a cada
+medio de cobro.
+
+**No es un defecto del módulo: falta el dato.** Es lo que se le pidió a Nave en N9 y sigue sin
+llegar. El flujo de link de pago no se puede homologar en sandbox hasta tenerlo, y el bloque B de la
+matriz queda detenido por eso, no por el código.
+
+Lo que sí quedó verificado es el diagnóstico, con el error real y no con un mock:
+
+```
+[payment_nave] Nave rechazó la intención por identidad: medio 'payment_link',
+pos_id 'f71ba756-…'. Ese pos_id pertenece a otro medio de cobro: revisá la
+configuración del proveedor.
+```
+
+Eso cumple el requisito *Error de identidad diagnosticable* de `nave-payment-provider`: quien se
+tope con esto sabe qué pasa sin tener que leer el código ni adivinar.
+
+Nota al margen: el wizard devolvió primero un `HTTP 500 "Error getting api status by payment type
+payment_link"`, y recién el POST directo mostró el `400 invalid_pos`. Nave contesta de dos formas
+distintas para la misma causa, así que conviene no confiar sólo en el código de estado.
+
+### 3.25 La cantidad fraccionaria ya se lee en el checkout (2026-10-05)
+
+Verificado en la pantalla de Nave con `18.0.1.11.2` desplegado, pedido `S00032`:
+
+```
+Detalle de la compra
+1× 0,15 kg [PRUEBA] ...     $120,00
+Total                       $ 120,00
+```
+
+Antes decía `1x [PRUEBA] Granel por kilo`, sin rastro de los 0,15 kg. La cantidad se había puesto al
+frente de la descripción dando por sentado que Nave la muestra; leyendo el DOM del checkout se vio
+que **la descripción no se renderiza en ninguna de sus pantallas**. Pasó entonces al nombre, primero
+para que sobreviva tanto al recorte de 100 caracteres como al truncado por CSS, como se ve arriba.
+
+El `1×` lo antepone Nave y no se puede suprimir, así que el cliente lee `1× 0,15 kg`. Es redundante,
+pero es preferible a que lea `1x` a secas y crea que compró una unidad.
+
 ### 3.23 A2: el circuito del e-commerce, de punta a punta (2026-10-05)
 
 Primera vez que se recorre entero el camino del cliente —carrito, dirección, medio de pago, checkout
