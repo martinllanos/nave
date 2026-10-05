@@ -458,6 +458,31 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.23 A2: el circuito del e-commerce, de punta a punta (2026-10-05)
+
+Primera vez que se recorre entero el camino del cliente —carrito, dirección, medio de pago, checkout
+de Nave, pago con tarjeta, retorno— y llega hasta la contabilidad.
+
+El retorno, que tampoco se había probado nunca, funciona en dos tiempos: `/payment/status` muestra
+*"Espere… Aún no se ha procesado su pago"* con el importe y la referencia, y cuando entra el webhook
+redirige sola a `/shop/confirmation` con *"Tu pago se procesó con éxito"*. El cliente no tiene que
+hacer nada.
+
+| | |
+|---|---|
+| Transacción | `S00030-2`, `done`, post-procesada |
+| Pedido | `S00030`, confirmado |
+| Asiento | `PBNK1/2026/00008` por $1.150,00 |
+| Tarjeta | NARANJA CREDIT ****3355 — TARJETA NARANJA S.A. |
+| Plan | 1 cuota, sin interés, total al cliente $1.150,00 |
+| Comprobantes | cupón `TEE702191588`, autorización `002999`, lote `490` |
+
+Mensaje de estado: *"Pago aprobado. Tarjeta: NARANJA CREDIT ****3355 · Cupón: TEE702191588"*.
+
+Con esto quedan encadenados y verificados en un solo recorrido los tres arreglos del día: la
+redirección que conserva la intención (§3.22), el detalle que cuadra con lo cobrado (§3.20) y el
+registro del instrumento de pago (§3.18).
+
 ### 3.22 🔴 Nadie podía pagar desde la tienda (2026-10-05)
 
 El recorrido que hace un cliente de verdad —entrar al sitio, armar el carrito, cargar la dirección,
@@ -1333,7 +1358,7 @@ deciden cómo se escribe el fix de B11.
 |---|---|---|---|---|
 | A1 | Métodos visibles en checkout | Carrito → Pagar | Se listan los métodos habilitados de Nave | ✅ 2026-10-05: aparecen **"QR Interoperable Nave"** y **"Tarjeta"**, ambos con el sello "Asegurado por Nave". B7 queda descartado. §3.22 |
 | A0 | ⚠️ Forma de pago en sandbox | Llegar al hosted checkout y ver qué ofrece | ✅ 2026-10-05: ofrece **las dos cosas**, "Código QR" e "Ingresá los datos" de tarjeta, con los datos del comprador precargados desde nuestro `buyer`. A2–A6 son ejecutables tal como están redactados. §3.22 |
-| A2 | Pago aprobado con tarjeta Naranja | Carrito → Nave → `5895 6248 4026 3355` | Redirige a `checkout_url`, vuelve a `/payment/status`, webhook llega, tx `done`, pedido confirmado. **Tiene precedente: ya pasó el 2026-08-11 (§4.2)** | ⬜ |
+| A2 | Pago aprobado con tarjeta Naranja | Carrito → Nave → `5895 6248 4026 3355` | Redirige a `checkout_url`, vuelve a `/payment/status`, webhook llega, tx `done`, pedido confirmado | ✅ 2026-10-05, S00030-2: el circuito entero, carrito a asiento contable. §3.23 |
 | A3 | Pago aprobado con Visa 1 cuota | `4025 2200 0000 0139` | Ídem A2 | ⬜ |
 | A4 | Pago aprobado con Visa 6 cuotas | `4761 2299 9900 0231` | Ídem A2 + verificar que el plan de cuotas queda registrado | ⬜ |
 | A5 | Rechazo por fondos | `4025 2200 0000 0127` | tx → `cancel` con el `reason_code` de Nave en el chatter | ⬜ |
