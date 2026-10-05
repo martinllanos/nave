@@ -37,5 +37,10 @@
 - [ ] 3.2 Cargar el `pos_id` de LINK DE PAGO en el proveedor de producción, generar un link desde una
       factura de prueba y confirmar que Nave lo acepta. Verificar: la respuesta trae `checkout_url`
       en lugar de `409 INVALID_POS`, y queda creada la `payment.transaction` asociada.
+      - **Parcial (2026-10-05)**: el `pos_id` quedó cargado y la resolución por medio verificada en
+        producción (`ecommerce` → tienda, `payment_link` → el suyo). La generación del link **no se
+        pudo completar**: el proveedor tiene credenciales de **sandbox** y la autenticación de
+        producción devuelve 401. Ver `tasks/plan_homologacion_nave.md` §3.17. Bloqueada hasta
+        cargar las credenciales de producción.
 - [ ] 3.3 Confirmar que el checkout del sitio sigue cobrando tras el cambio, con un cobro acotado.
       Verificar: la transacción llega a `done` y el pedido queda confirmado.

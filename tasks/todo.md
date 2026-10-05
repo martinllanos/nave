@@ -79,7 +79,13 @@ Relevada del DevPortal de Nave. Detalle en `tasks/plan_homologacion_nave.md` y `
 - [ ] 🟠 **Cancelar intención puede no aplicar a `smart_pos`**: el error de baja lista sólo `payment_link, dynamic_qr, static_qr`. Verificar el caso C4.
 - [ ] 🟠 **`buyer` es opcional**: dejar de mandar `'00000000'` / `'correo@temporal.com'` / `'S/D'` cuando el partner está incompleto.
 - [ ] 🟢 **Simulador PCT para QR**: `PUT /qrtools/transfer_payment/simulation/payment` paga *nuestra propia* intención. Permite homologar QR end-to-end sin hardware.
-- [ ] Bajar de **Nave > Integraciones > Sistema de gestión** el archivo con los IDs de puntos de venta.
+- [ ] Bajar de **Nave > Integraciones > Sistema de gestión** el archivo con los IDs de puntos de venta. *(Bajado una vez: trae ECOMMERCE `b4c94f29-…` y LINK DE PAGO `925a1b22-…`, ambos de producción. Falta bajarlo de nuevo con la terminal `L40037644` vinculada. Ver `plan_homologacion_nave.md` §3.16.)*
+- [ ] 🔴 **Confirmar a qué tienda corresponde `b4c94f29-…`**: figura bajo el local WOOCOMMERCE, que en §3.9.k era `onlyone.aureofy.net`, no `www.onlyone.ar`.
+- [ ] 🔴 **`pos_id` propio para links de pago**: el módulo usa `provider.nave_pos_id` para checkout y para links, y Nave asigna uno por tipo (`409 INVALID_POS`). Requiere un change aparte.
+- [x] Terminal de producción `L40037644` recibida y vinculada (2026-09-26). Falta su `pos_id` (P17).
+- [ ] Resolver los `pos_id` de producción por **prueba y rotación** con los ids que ya tenemos, un cobro mínimo por intento y la respuesta de Nave anotada (decisión del 2026-09-26).
+- [ ] 🔴 **2026-10-03: rotar el token de GitHub** filtrado en el historial de `martinllanos/do-onlyone`. Hasta esa fecha, confirmar que el repo es privado.
+- [x] Sandbox de Nave: sólo opera de 10:00 a 18:00, así que queda descartado por horario. Los rechazos se prueban en producción con tarjeta vencida o CVV incorrecto.
 
 ### Bloqueo operativo con Nave (2026-09-21)
 - [ ] 🔴🔴 **Conseguir acceso al comercio/local de prueba.** La terminal `L40000978` se identifica como dispositivo TEST y pide vincularse a un local "test" que no existe en nuestro Espacio Nave. El QR que se pudo descargar es de **producción** (`Be onlyone Jujuy - QR 1`) y **no debe usarse para pruebas**: son cobros reales. Bloquea los bloques C y H completos. Ver `plan_homologacion_nave.md` §3.10.
@@ -90,6 +96,7 @@ Relevada del DevPortal de Nave. Detalle en `tasks/plan_homologacion_nave.md` y `
 - [ ] E2 — Preparar entorno (base de homologación, terminal física, notification_url registrada).
 - [ ] E3 — Ejecutar la matriz de casos (bloques A a G).
 - [ ] E4 — Empaquetar evidencias y demo a Nave.
+- [ ] E5 — Retirar el set de productos de homologación (`HOMO-NAVE-01` a `10`): archivar los productos y eliminar las dos categorías "Homologación Nave". Procedimiento en `docs/homologacion/README.md` § Retiro.
 
 ## Pendientes / Mejoras a Futuro
 - [ ] Analizar y definir el flujo/duración de los links de pago de Nave para facturas recurrentes de suscripción (evitando la expiración de 24 horas del enlace si el cliente demora en pagar).

@@ -333,8 +333,8 @@ Consecuencias para el plan:
 | P3 | Registrar la `notification_url` del lado de Nave | Comercial | ✅ **hecho**. Es **la misma URL para homologación y producción**: `https://www.onlyone.ar/payment/nave/webhook`. Lo que cambia es el estado `test`/`enabled` del provider — ver §3.7 |
 | P4 | Terminal Smart Point física de prueba | Comercial | ⚠️ **recibida (serie `L40000978`) pero NO vinculable**: pide un local "test" que no existe en nuestro portal — ver §3.10 |
 | P13 | Vincular la terminal `L40000978` | Comercial | ✅ **RESUELTO 2026-09-23**. Nave mandó un código nuevo y la terminal quedó vinculada. Confirmó además el mismo `pos_id` `b1c04ade-…` |
-| P16 | Cobro con tarjeta física | Comercial | ⏳ **destrabado el 2026-09-28**: llega la terminal de **producción** y se prueba con plástico real, bajo los topes de §3.11 |
-| P17 | 🔴 Obtener el **`pos_id` de la terminal de producción** | Comercial | ⬜ Es un dispositivo distinto del de test: tiene su propio `pos_id`. Pedirlo junto con la terminal |
+| P16 | Cobro con tarjeta física | Comercial | ⏳ **destrabado**: la terminal de **producción** `L40037644` llegó antes de lo previsto y ya está vinculada (2026-09-26). Se prueba con plástico real bajo los topes de §3.11. Los rechazos se provocan con tarjeta vencida o CVV incorrecto (§3.16) |
+| P17 | 🔴 Obtener el **`pos_id` de la terminal de producción** `L40037644` | Comercial | ⏳ Terminal vinculada el 2026-09-26. Su `pos_id` no figura en la planilla de *Sistema de gestión* descargada antes de la vinculación: hay que bajarla de nuevo. Ver la tabla de §3.16 |
 | P15 | Cargar el `pos_id` de la terminal (`b1c04ade-…`) en el método de pago POS | Técnico | ✅ **hecho 2026-09-23**. Requirió cerrar la sesión POS/00005: Odoo no deja modificar un método de pago con sesiones abiertas |
 | P12 | 🔴 Obtener de Nave el **`pos_id` (UUID) que corresponde a la terminal `L40000978`** y cargarlo en `nave_terminal_id`. Hoy ese campo tiene `f71ba756-1d80-4ab3-9f43-5dc247fd6c4a`, que es **el mismo UUID que el `nave_pos_id` de e-commerce** del provider — ver §3.5 | Técnico | ⬜ |
 | P5 | Confirmar con Nave el host de sandbox de Smart POS: `e3-api.ranty.io` (doc) vs `api-sandbox.ranty.io` (código) | Técnico | ⬜ |
@@ -452,6 +452,66 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.17 🔴 El proveedor de producción tiene credenciales de sandbox (2026-10-05)
+
+Verificado probando las credenciales cargadas contra los dos endpoints de autenticación, desde el
+propio servidor:
+
+| Ambiente | Resultado |
+|---|---|
+| Producción (`services.apinaranja.com`) | **HTTP 401**, sin token |
+| Sandbox (`homoservices.apinaranja.com`) | **HTTP 200**, token emitido |
+
+La configuración quedó mezclada: **URLs de producción** (proveedor en `enabled`), **credenciales de
+sandbox** y **`pos_id` de producción** (`b4c94f29` para tienda, `925a1b22` para link de pago).
+
+**Con eso no se puede cobrar por ningún flujo**: ni checkout ni link, porque la autenticación falla
+antes de llegar a crear la intención.
+
+Es el primer punto del checklist de §3.11 —*"cargar las credenciales de producción antes de cambiar
+el estado"*— que quedó sin hacer. El orden importa justamente por esto: con el estado cambiado y las
+credenciales viejas, el error que se ve es un 401 que no dice qué falta.
+
+**Para destrabar**: cargar el set de credenciales de producción que Nave entrega aparte del de
+sandbox. Si todavía no lo recibimos, pedirlo en el hilo abierto con integraciones.
+
+Nota: el `pos_id` de link de pago (`925a1b22`) quedó cargado y la resolución por medio funciona
+—se verificó que `ecommerce` devuelve el de tienda y `payment_link` el suyo—, así que ese frente
+queda listo para cuando haya credenciales.
+
+### 3.16 Sandbox restringido, terminal de producción vinculada y `pos_id` por ambiente (2026-09-26)
+
+**El sandbox de Nave sólo opera de 10:00 a 18:00.** Lo informó soporte (Jonathan Castillo) el 2026-09-24. Ese horario no coincide con el de trabajo en este proyecto, así que **el sandbox queda descartado en la práctica**. La homologación restante sigue por la vía de §3.11 (producción acotada).
+
+- **Rechazos (A5, A6, C3):** se provocan con **tarjeta vencida o CVV incorrecto**.
+- **QR en sandbox:** no se puede probar desde la terminal de prueba, sólo desde el simulador de `navenegocios.ar/home/developers`.
+
+**Terminal de producción:** serie `L40037644`, llegó antes del 28/09 y ya está **vinculada**. Falta su `pos_id` (P17).
+
+**`pos_id` conocidos, por ambiente.** El ambiente se define por **de dónde sale el id**, no por el nombre del local: el comercio puede renombrar un dispositivo, y "ONLYONE test" hoy se llama "Be Onlyone".
+
+| `pos_id` | Origen | Ambiente |
+|---|---|---|
+| `f71ba756-1d80-4ab3-9f43-5dc247fd6c4a` | Mail *"Integración Nave \| Sandbox \| Onlyone"* (2026-06-18), rotulado "POS ID de Prueba (Test)". Es también el UUID de ejemplo de toda la doc de Nave | Sandbox |
+| `b1c04ade-dec9-4ca0-9fd9-8464c9006764` | Terminal `L40000978` (DEBUG), §3.5 | Sandbox |
+| `b4c94f29-0910-448e-9ad7-6dd2f791a957` | *Sistema de gestión*: medio ECOMMERCE. Sirve para cualquier tienda (ver alerta 1). **Cargado en producción el 2026-10-05** | Producción |
+| `925a1b22-fc90-47b7-a92a-cf9f621139b5` | *Sistema de gestión*: local LINK DE PAGO, medio LDP | Producción |
+| pendiente | Terminal Nave Point `L40037644` | Producción |
+
+**Dos alertas:**
+
+1. ~~**`b4c94f29` figura bajo el local WOOCOMMERCE.**~~ ✅ **RESUELTO (2026-10-05)**: el `pos_id` de
+   e-commerce **sirve para cualquier tienda**. Lo que Nave valida es la `notification_url` que le
+   informamos, no el nombre del local bajo el que figura el dispositivo. Cargado en producción el
+   2026-10-05.
+
+   Ojo con el alcance de esa afirmación: vale **entre tiendas**, no **entre medios de cobro**. El
+   error `INVALID_POS` dice textualmente *"Given POS is for a different payment type"*, así que
+   ECOMMERCE y LDP siguen siendo identificadores distintos — que es justamente la alerta 2.
+2. **Los links de pago tienen su propio `pos_id` (LDP), pero el módulo usa `provider.nave_pos_id` tanto para checkout (`payment_transaction.py:68`) como para links (`nave_link_wizard.py:186`).** Con un solo valor cargado, uno de los dos flujos va a recibir `409 INVALID_POS`. Hace falta un campo aparte para el `pos_id` de links.
+
+Los códigos `J-6A0F-A859-A` y `P-6A2A-F7D3-D` de *Tienda online propia* **no** son `pos_id`: son códigos de vinculación (§3.9.j).
+
 ### 3.15 Cronograma: la terminal de producción llega el 2026-09-28
 
 | Hasta el 28/09 | Desde el 28/09 |
@@ -477,6 +537,8 @@ sea el `payment_id` del pago). Si eso queda verificado antes, el lunes se dedica
 requiere plástico.
 
 ### 3.14 Terminal vinculada, pero sólo cobra por QR (2026-09-23)
+
+> **Corrección (2026-09-24):** según soporte de Nave, la terminal de prueba **sí** tiene tarjetas de prueba. Al elegir *Tarjeta* ofrece *Leer tarjeta* o **Simular**, que muestra tarjetas simuladas de distintas marcas (recomiendan NFC Crédito Visa o Chip). Sólo funciona **de 10:00 a 18:00**. Probablemente no apareció porque se probó fuera de ese horario. Ver §3.16.
 
 Nave envió un código de vinculación nuevo y **la terminal `L40000978` quedó operativa**. Confirmaron
 además el mismo `pos_id`: `b1c04ade-dec9-4ca0-9fd9-8464c9006764`.

@@ -8,6 +8,8 @@
 
 - **No inferir el propósito de un entorno por el naming de la infraestructura.** (2026-09-20) Deduje que `do-onlyone` era producción porque el router de traefik se llama `odoo-prod`, la base se llama `www.onlyone.ar` y sirve el sitio público con movimientos contables. Es el entorno de **homologación**. El naming heredado no describe el propósito: preguntar antes de construir recomendaciones encima de esa suposición (en este caso armé una recomendación entera de "levantar una base separada" que no hacía falta).
 
+- **Tampoco inferir el ambiente de un `pos_id` por el nombre del dispositivo o del local.** (2026-09-26) Clasifiqué como sandbox una planilla de *Sistema de gestión* porque el dispositivo se llamaba "ONLYONE test": era de **producción**, con un nombre que el usuario había puesto y después cambió a "Be Onlyone". Los nombres los edita el comercio. Lo que define el ambiente es **de dónde sale el id** (Espacio Nave real vs. mail de credenciales sandbox) y **contra qué credenciales responde**. Preguntar el origen antes de clasificar.
+
 ## ✅ Patrones a Seguir (Best Practices)
 *(Ejemplos: Usar subagentes para la lectura de logs pesados)*
 
