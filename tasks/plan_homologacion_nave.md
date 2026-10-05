@@ -505,9 +505,24 @@ La causa es `int(line.product_uom_qty) or 1` (`payment_transaction.py:161`, y su
 Alcanza a cualquier venta por peso, por tiempo o por medida: granel, servicios por hora, metros de
 tela, litros. No es un caso de borde del catálogo de prueba.
 
-Queda por resolver en el diseño si Nave acepta decimales en `quantity` —la doc no lo aclara— o si hay
-que mandar `quantity: 1` con el subtotal de la línea como `unit_price` y la cantidad real en la
-descripción.
+**Sondeo contra sandbox para no diseñar a ciegas** (la doc no aclara si `quantity` admite decimales):
+
+| Payload | Respuesta |
+|---|---|
+| `quantity: 0.15`, unit `800.00`, total `120.00` | **HTTP 502** con una página HTML de error |
+| `quantity: 1`, unit `120.00`, total `120.00` | **200 OK** |
+| `quantity: 1`, unit `800.00`, total `120.00` | **200 OK** |
+
+Nave **no acepta cantidades fraccionarias** —y ni siquiera devuelve un 400: se cae con un 502— y
+acepta el detalle descuadrado sin validarlo. Así que la corrección no puede ser mandar el decimal:
+cuando la cantidad no sea entera hay que enviar `quantity: 1` con el **subtotal de la línea** como
+`unit_price` y la cantidad real en la descripción. Para cantidades enteras conviene seguir mandando
+la cantidad tal cual, que es lo que el cliente espera ver.
+
+El post-proceso de Odoo (confirmar el pedido, generar el asiento) va por el cron
+`payment.cron_post_process_payment_tx`, no por el webhook: S00020 quedó unos minutos en `done` con el
+pedido en borrador y sin asiento, hasta que corrió el cron y generó `PBNK1/2026/00007` por $120,00.
+Conviene saberlo para no confundir esa ventana con un fallo.
 
 #### C1 resuelto: la forma de `status` no es la misma en los dos lugares
 
