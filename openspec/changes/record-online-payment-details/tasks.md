@@ -41,6 +41,6 @@
 - [x] 4.2 Correr la suite completa de `payment_nave` y `pos_nave`, más flake8 y bandit según
       `.agent/rules.md` §6. Verificar: 0 fallos, 0 errores de lint y 0 hallazgos de severidad media o
       superior.
-- [ ] 4.3 Cobrar en cuotas contra sandbox y confirmar el registro de punta a punta. Verificar: la
+- [x] 4.3 Cobrar en cuotas contra sandbox y confirmar el registro de punta a punta. Verificar: la
       transacción muestra marca, últimos cuatro, cupón, lote y plan, y el mensaje del documento
       describe el medio sin mencionar billetera.

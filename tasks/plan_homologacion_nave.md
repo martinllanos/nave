@@ -527,6 +527,30 @@ Dos consecuencias:
 Nota al margen: el caso A4 se ejecutó con la tarjeta rotulada "6 cuotas" en la documentación, pero
 el plan aplicado fue de **3**. El plan lo elige el pagador en el checkout, no la tarjeta.
 
+**Resuelto y verificado el mismo día.** El cobro `S00009` ($1.150 en 3 cuotas) entró ya con el
+módulo en `18.0.1.10.1` y quedó registrado completo:
+
+| Campo | Valor |
+|---|---|
+| Tarjeta | VISA CREDIT ****0231 — BANCO SANTANDER ARGENTINA S.A. |
+| Ingreso | `manual_input` |
+| Cupón / autorización / lote | `FPK468700137` / `002999` / `490` |
+| Plan | 3 cuotas, con interés, tasa 7,40%, TNA 63%, CFT 9,83% |
+| Total pagado por el cliente | $1.263,10 (contra $1.150,00 de la venta) |
+
+El contraste entre los dos mensajes de estado es la evidencia más corta de qué cambió:
+
+```
+S00007 (antes) → Pago Aprobado con éxito. Billetera utilizada: N/A. Nave ID: efb673c7…
+S00009 (ahora) → Pago aprobado. Tarjeta: VISA CREDIT ****0231 · Cuotas: 3 ·
+                 total pagado por el cliente: 1263.10 · Cupón: FPK468700137. Nave ID: a19dc285…
+```
+
+**`payment_input: "manual_input"` cierra además una duda operativa**: el checkout de sandbox **sí**
+habilita el ingreso manual de tarjeta. La doc advertía que eso depende de la configuración del
+comercio y que sin él sólo se puede pagar escaneando con billetera, lo que habría dejado A2–A6 sin
+poder ejecutarse. Están ejecutables.
+
 ### 3.17 🔴 El proveedor de producción tiene credenciales de sandbox (2026-10-05)
 
 Verificado probando las credenciales cargadas contra los dos endpoints de autenticación, desde el
