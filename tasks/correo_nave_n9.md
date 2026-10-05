@@ -1,21 +1,38 @@
 # Borradores de correo a Nave
 
-## Borrador 4 — permiso de devoluciones por API (2026-10-05)
+## Borrador 4 — los dos bloqueos que quedan (2026-10-05)
 
 > Correo **nuevo** a `integraciones@navenegocios.com`, con copia a Jonathan Castillo.
-> Mismo criterio que el borrador 3: pedido puntual, sin explicar de más. La diferencia con el pedido
-> que se hizo el 2026-09-22 es que ya no preguntamos cuál es el endpoint: lo ubicamos, y lo que
-> falta es el permiso. Ver `plan_homologacion_nave.md` §3.21.
+> Mismo criterio que el borrador 3: pedidos puntuales, sin explicar de más. Van los dos juntos
+> porque son lo único que falta para terminar la homologación, y cada uno lleva la respuesta
+> textual de la API, que es más difícil de desatender que una consulta en abstracto.
+> Ver `plan_homologacion_nave.md` §3.21 y §3.24.
 
 ---
 
-**Asunto:** Habilitación de devoluciones por API — Be onlyone, CUIT 20-26253453-8
+**Asunto:** Dos habilitaciones pendientes — Be onlyone, CUIT 20-26253453-8
 
 Hola, buen día.
 
-Les escribo desde **Be onlyone** (CUIT **20-26253453-8**).
+Les escribo desde **Be onlyone** (CUIT **20-26253453-8**). Tenemos la integración funcionando en
+sandbox y nos quedan dos cosas por habilitar de su lado para poder terminar las pruebas.
 
-Necesitamos **habilitar las devoluciones por API** para nuestras credenciales. Al invocar
+### 1. El `pos_id` de LINK DE PAGO del comercio de prueba
+
+Sólo contamos con el `pos_id` de tienda. Al generar un link de pago con él, la API responde:
+
+```
+POST /api/payment_request/payment_link
+400 — {"code": "invalid_pos", "message": "Given POS is for a different payment type"}
+```
+
+El mismo `pos_id` funciona correctamente contra `/api/payment_request/ecommerce`, así que entendemos
+que falta el identificador del medio **link de pago**. ¿Nos lo pueden proporcionar para el comercio
+de sandbox?
+
+### 2. Habilitación de devoluciones por API
+
+Necesitamos **habilitar las devoluciones** para nuestras credenciales. Al invocar
 
 ```
 DELETE /api/payments/{payment_id}
@@ -31,7 +48,7 @@ con un token válido, la API responde:
 Por lo que entendemos, el recurso existe y a nuestro `client_id` le falta el permiso sobre ese
 método. ¿Nos lo pueden habilitar, en sandbox y en producción?
 
-Dos consultas que acompañan al pedido:
+Dos consultas que acompañan a este segundo pedido:
 
 1. El endpoint no figura en la documentación del DevPortal. ¿Sigue siendo el vigente para
    devoluciones, o hay otro que debamos usar?
