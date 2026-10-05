@@ -1148,3 +1148,224 @@ class TestNaveProvider(PaymentCommon):
 
         self.assertEqual(tx.state, 'done')
         self.assertEqual(tx.nave_payment_id, 'pay-ok')
+
+    # ──────────────────────────────────────────────
+    # 9. EL DETALLE SE CORRESPONDE CON LO QUE SE COBRA
+    # ──────────────────────────────────────────────
+
+    def _nave_producto(self, nombre, precio, uom=None):
+        valores = {'name': nombre, 'list_price': precio, 'type': 'consu'}
+        if uom:
+            valores.update({'uom_id': uom.id, 'uom_po_id': uom.id})
+        return self.env['product.product'].create(valores)
+
+    def _nave_pedido(self, lineas):
+        """`lineas` es una lista de (producto, cantidad)."""
+        return self.env['sale.order'].create({
+            'partner_id': self.partner.id,
+            'order_line': [
+                Command.create({'product_id': p.id, 'product_uom_qty': qty, 'price_unit': p.list_price})
+                for p, qty in lineas
+            ],
+        })
+
+    def _nave_tx_de(self, pedido):
+        return self.env['payment.transaction'].create({
+            'provider_id': self.nave_provider.id,
+            'payment_method_id': self.nave_qr_method.id,
+            'amount': pedido.amount_total,
+            'currency_id': pedido.currency_id.id,
+            'reference': f"TEST-DETALLE-{pedido.id}",
+            'partner_id': self.partner.id,
+            'operation': 'online_redirect',
+            'sale_order_ids': [Command.set([pedido.id])],
+        })
+
+    def _nave_suma(self, detalle):
+        return sum(float(d['unit_price']['value']) * d['quantity'] for d in detalle)
+
+    def test_46_detalle_cantidad_entera_viaja_tal_cual(self):
+        """Con cantidad entera se informa la cantidad: es lo que el cliente espera leer."""
+        producto = self._nave_producto('Producto suelto', 500.0)
+        pedido = self._nave_pedido([(producto, 3)])
+        tx = self._nave_tx_de(pedido)
+
+        detalle = tx._nave_get_products_payload()
+
+        self.assertEqual(len(detalle), 1)
+        self.assertEqual(detalle[0]['quantity'], 3)
+        self.assertAlmostEqual(self._nave_suma(detalle), tx.amount, delta=0.03,
+                               msg="El detalle debe sumar lo mismo que se cobra, impuestos incluidos")
+
+    def test_47_detalle_cantidad_fraccionaria_cuadra_con_el_cobro(self):
+        """0,15 kg a $800 el kilo se cobra $120: el detalle tiene que decir $120, no $800.
+
+        Nave rechaza `quantity` fraccionario con un 502 y no valida que el detalle cuadre con el
+        importe, así que truncar la cantidad hacía que el cliente leyera 1 × $800 mientras se le
+        cobraban $120.
+        """
+        kg = self.env.ref('uom.product_uom_kgm')
+        producto = self._nave_producto('Granel por kilo', 800.0, uom=kg)
+        pedido = self._nave_pedido([(producto, 0.15)])
+        tx = self._nave_tx_de(pedido)
+
+        detalle = tx._nave_get_products_payload()
+
+        self.assertEqual(detalle[0]['quantity'], 1)
+        self.assertAlmostEqual(float(detalle[0]['unit_price']['value']), tx.amount, delta=0.01,
+                               msg="El detalle debe sumar lo mismo que se cobra")
+        self.assertIn('kg', detalle[0]['description'],
+                      "La cantidad real tiene que sobrevivir en la descripción")
+
+    def test_48_detalle_mezcla_de_cantidades_suma_el_total(self):
+        """Con líneas enteras y fraccionarias mezcladas, el detalle sigue sumando el importe."""
+        kg = self.env.ref('uom.product_uom_kgm')
+        entero = self._nave_producto('Caja cerrada', 500.0)
+        granel = self._nave_producto('Granel por kilo', 800.0, uom=kg)
+        pedido = self._nave_pedido([(entero, 2), (granel, 0.25)])
+        tx = self._nave_tx_de(pedido)
+
+        detalle = tx._nave_get_products_payload()
+
+        self.assertEqual(len(detalle), 2)
+        self.assertAlmostEqual(self._nave_suma(detalle), tx.amount, delta=0.03)
+
+    def test_49_detalle_redondea_el_subtotal_a_dos_decimales(self):
+        """Un subtotal con más de dos decimales se informa con dos, que es lo que Nave admite."""
+        kg = self.env.ref('uom.product_uom_kgm')
+        producto = self._nave_producto('Granel con cola', 333.33, uom=kg)
+        pedido = self._nave_pedido([(producto, 0.333)])
+
+        detalle = self._nave_tx_de(pedido)._nave_get_products_payload()
+
+        valor = detalle[0]['unit_price']['value']
+        self.assertEqual(len(valor.split('.')[1]), 2, f"Se esperaban 2 decimales y llegó {valor}")
+
+    def test_50_el_link_de_pago_arma_el_mismo_detalle_que_el_checkout(self):
+        """El defecto estaba escrito en las cuatro ramas: el link no puede quedar con su copia."""
+        kg = self.env.ref('uom.product_uom_kgm')
+        producto = self._nave_producto('Granel por kilo', 800.0, uom=kg)
+        pedido = self._nave_pedido([(producto, 0.15)])
+        pedido.action_confirm()
+
+        wizard = self.env['nave.payment.link.wizard'].create({
+            'provider_id': self.nave_provider.id,
+            'company_id': self.env.company.id,
+            'partner_id': self.partner.id,
+            'amount': pedido.amount_total,
+            'currency_id': pedido.currency_id.id,
+            'external_reference': f"SO-{pedido.id}",
+            'sale_id': pedido.id,
+        })
+
+        por_link = wizard._nave_build_products_payload()
+        por_checkout = self._nave_tx_de(pedido)._nave_get_products_payload()
+
+        self.assertEqual(por_link[0]['quantity'], por_checkout[0]['quantity'])
+        self.assertEqual(por_link[0]['unit_price']['value'], por_checkout[0]['unit_price']['value'])
+        self.assertEqual(por_link[0]['quantity'], 1,
+                         "La línea fraccionaria se informa como una unidad por el total")
+
+    @patch('odoo.addons.payment_nave.models.nave_link_wizard.requests.post')
+    def test_51_el_link_de_pago_dice_a_donde_volver(self, mock_post):
+        """Sin `callback_url` el cliente que paga una factura queda en la pantalla de Nave.
+
+        Es la URL que habilita el botón "Volver a la tienda" al aprobarse el pago, y el checkout ya
+        la manda: el wizard era el único de los dos que no.
+        """
+        self._nave_arm_token()
+        mock_post.return_value = MagicMock(
+            json=MagicMock(return_value={
+                'id': 'pr-callback-001',
+                'checkout_url': 'https://checkout.ranty.io/link/pr-callback-001',
+            }),
+            raise_for_status=MagicMock(return_value=None),
+        )
+
+        wizard = self.env['nave.payment.link.wizard'].create({
+            'provider_id': self.nave_provider.id,
+            'company_id': self.env.company.id,
+            'partner_id': self.partner.id,
+            'amount': 1500.0,
+            'currency_id': self.currency_ars.id,
+            'external_reference': 'INV-CALLBACK-001',
+        })
+        wizard.action_generate_link()
+
+        payload = mock_post.call_args.kwargs['json']
+        self.assertIn('additional_info', payload,
+                      "El payload del link debe llevar el bloque additional_info")
+        self.assertTrue(payload['additional_info'].get('callback_url'),
+                        "El link de pago debe decirle a Nave a dónde volver")
+        self.assertTrue(payload['additional_info']['callback_url'].endswith('/payment/nave/return'),
+                        "Debe ser la misma ruta de retorno que usa el checkout")
+
+    def _nave_checkout_payload(self, mock_post, provider=None, amount=1000.0):
+        """Dispara la creación de una intención y devuelve el payload que se le mandó a Nave."""
+        proveedor = provider or self.nave_provider
+        mock_post.return_value = MagicMock(
+            json=MagicMock(return_value={
+                'id': 'pr-duracion-001',
+                'checkout_url': 'https://checkout.ranty.io/pr-duracion-001',
+            }),
+            raise_for_status=MagicMock(return_value=None),
+        )
+        tx = self.env['payment.transaction'].create({
+            'provider_id': proveedor.id,
+            'payment_method_id': self.nave_qr_method.id,
+            'amount': amount,
+            'currency_id': self.currency_ars.id,
+            'reference': f"TEST-DURACION-{proveedor.id}-{amount}",
+            'partner_id': self.partner.id,
+            'operation': 'online_redirect',
+        })
+        tx._get_specific_rendering_values({})
+        return mock_post.call_args.kwargs['json']
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.post')
+    def test_52_el_plazo_del_checkout_por_omision_no_cambia(self, mock_post):
+        """Quien no toque nada tiene que seguir teniendo los 50 minutos de siempre."""
+        self._nave_arm_token()
+
+        payload = self._nave_checkout_payload(mock_post)
+
+        self.assertEqual(payload['duration_time'], 3000)
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.post')
+    def test_53_el_plazo_del_checkout_es_configurable(self, mock_post):
+        """El plazo era un número fijo en el código y ya hizo vencer intenciones."""
+        self._nave_arm_token()
+        self.nave_provider.nave_checkout_duration_minutes = 120
+
+        payload = self._nave_checkout_payload(mock_post)
+
+        self.assertEqual(payload['duration_time'], 7200)
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.post')
+    def test_54_cada_compania_tiene_su_propio_plazo(self, mock_post):
+        """El plazo vive en el proveedor justamente para no ser global."""
+        self._nave_arm_token()
+        self.nave_provider.nave_checkout_duration_minutes = 30
+
+        otra_compania = self.env['res.company'].create({'name': 'Otra Compañía Nave'})
+        otro_proveedor = self.env['payment.provider'].create({
+            'name': 'Nave Otra',
+            'code': 'nave',
+            'state': 'test',
+            'company_id': otra_compania.id,
+            'nave_client_id': 'otro_client_id',
+            'nave_client_secret': 'otro_secret',
+            'nave_pos_id': 'pos-otra-001',
+            'nave_checkout_duration_minutes': 90,
+            'payment_method_ids': [Command.set([self.nave_qr_method.id])],
+        })
+        otro_proveedor.write({
+            'nave_access_token': 'tok_test',
+            'nave_token_expiry': self.env['payment.provider']._fields['nave_token_expiry'].from_string('2099-01-01 00:00:00'),
+        })
+
+        propia = self._nave_checkout_payload(mock_post, amount=1000.0)
+        ajena = self._nave_checkout_payload(mock_post, provider=otro_proveedor, amount=2000.0)
+
+        self.assertEqual(propia['duration_time'], 1800)
+        self.assertEqual(ajena['duration_time'], 5400)

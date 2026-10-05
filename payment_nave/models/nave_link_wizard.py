@@ -7,8 +7,12 @@
 import logging
 import requests
 
+from werkzeug import urls
+
 from odoo import Command, api, fields, models, _
 from odoo.exceptions import UserError
+
+from .nave_payload import nave_product_entry
 
 _logger = logging.getLogger(__name__)
 
@@ -196,6 +200,11 @@ class NavePaymentLinkWizard(models.TransientModel):
                 }
             ],
             'buyer': self._nave_build_buyer_payload(),
+            # Sin esto el cliente que paga una factura se queda en la pantalla de Nave: es la URL
+            # que habilita el botón "Volver a la tienda" al aprobarse el pago.
+            'additional_info': {
+                'callback_url': urls.url_join(self.get_base_url(), '/payment/nave/return'),
+            },
             'duration_time': duration_seconds,
         }
 
@@ -301,38 +310,34 @@ class NavePaymentLinkWizard(models.TransientModel):
 
         if self.move_id:
             for line in self.move_id.invoice_line_ids.filtered(lambda inv_line: not inv_line.display_type):
-                products.append({
-                    'name': (line.product_id.name or line.name or 'Ítem')[:100],
-                    'description': (line.name or '')[:150],
-                    'quantity': int(line.quantity) or 1,
-                    'unit_price': {
-                        'currency': 'ARS',
-                        'value': f"{line.price_unit:.2f}",
-                    },
-                })
+                products.append(nave_product_entry(
+                    self.env,
+                    name=line.product_id.name or line.name,
+                    description=line.name,
+                    quantity=line.quantity,
+                    line_total=line.price_total,
+                    uom_name=line.product_uom_id.name,
+                ))
         elif self.sale_id:
             for line in self.sale_id.order_line.filtered(lambda sale_line: not sale_line.display_type):
-                products.append({
-                    'name': (line.product_id.name or line.name or 'Ítem')[:100],
-                    'description': (line.name or '')[:150],
-                    'quantity': int(line.product_uom_qty) or 1,
-                    'unit_price': {
-                        'currency': 'ARS',
-                        'value': f"{line.price_reduce_taxexcl:.2f}",
-                    },
-                })
+                products.append(nave_product_entry(
+                    self.env,
+                    name=line.product_id.name or line.name,
+                    description=line.name,
+                    quantity=line.product_uom_qty,
+                    line_total=line.price_total,
+                    uom_name=line.product_uom.name,
+                ))
 
         # Fallback genérico si no hay líneas de detalle
         if not products:
-            products.append({
-                'name': f"Pago {self.external_reference}"[:100],
-                'description': 'Link de pago generado desde Odoo',
-                'quantity': 1,
-                'unit_price': {
-                    'currency': 'ARS',
-                    'value': f"{self.amount:.2f}",
-                },
-            })
+            products.append(nave_product_entry(
+                self.env,
+                name=f"Pago {self.external_reference}",
+                description='Link de pago generado desde Odoo',
+                quantity=1,
+                line_total=self.amount,
+            ))
 
         return products
 

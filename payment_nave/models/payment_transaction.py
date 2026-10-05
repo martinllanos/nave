@@ -9,6 +9,7 @@ from werkzeug import urls
 from odoo import api, fields, models, _
 from odoo.exceptions import UserError, ValidationError
 
+from .nave_payload import nave_product_entry
 from .payment_provider import NAVE_TRUSTED_DOMAIN
 
 _logger = logging.getLogger(__name__)
@@ -82,8 +83,9 @@ class PaymentTransaction(models.Model):
             'additional_info': {
                 'callback_url': return_url
             },
-            # Duración por defecto (50 minutos = 3000 segundos)
-            'duration_time': 3000
+            # Lo que el cliente tiene para terminar de pagar. Configurable en el proveedor: 50
+            # minutos fijos dejaban vencer intenciones sin que nadie pudiera estirar el plazo.
+            'duration_time': self.provider_id.nave_checkout_duration_minutes * 60
         }
 
         headers = {
@@ -155,40 +157,36 @@ class PaymentTransaction(models.Model):
         # Intentar leer desde las líneas de Sale Orders vinculadas
         if self.sale_order_ids:
             for line in self.sale_order_ids.mapped('order_line').filtered(lambda order_line: not order_line.display_type):
-                products.append({
-                    'name': line.product_id.name[:100],  # Recortar por seguridad de longitud
-                    'description': line.name[:150] or '',
-                    'quantity': int(line.product_uom_qty) or 1,
-                    'unit_price': {
-                        'currency': 'ARS',
-                        'value': f"{line.price_reduce_taxexcl:.2f}"
-                    }
-                })
+                products.append(nave_product_entry(
+                    self.env,
+                    name=line.product_id.name,
+                    description=line.name,
+                    quantity=line.product_uom_qty,
+                    line_total=line.price_total,
+                    uom_name=line.product_uom.name,
+                ))
 
         # Si no hay venta, intentar leer desde las líneas de Facturas vinculadas
         elif self.invoice_ids:
             for line in self.invoice_ids.mapped('invoice_line_ids').filtered(lambda inv_line: not inv_line.display_type):
-                products.append({
-                    'name': line.product_id.name[:100] if line.product_id else line.name[:100],
-                    'description': line.name[:150] or '',
-                    'quantity': int(line.quantity) or 1,
-                    'unit_price': {
-                        'currency': 'ARS',
-                        'value': f"{line.price_unit:.2f}"
-                    }
-                })
+                products.append(nave_product_entry(
+                    self.env,
+                    name=line.product_id.name if line.product_id else line.name,
+                    description=line.name,
+                    quantity=line.quantity,
+                    line_total=line.price_total,
+                    uom_name=line.product_uom_id.name,
+                ))
 
         # Fallback si no hay ventas ni facturas mapeadas directamente
         if not products:
-            products.append({
-                'name': f"Pago de transacción {self.reference}",
-                'description': f"Referencia Odoo: {self.reference}",
-                'quantity': 1,
-                'unit_price': {
-                    'currency': 'ARS',
-                    'value': f"{self.amount:.2f}"
-                }
-            })
+            products.append(nave_product_entry(
+                self.env,
+                name=f"Pago de transacción {self.reference}",
+                description=f"Referencia Odoo: {self.reference}",
+                quantity=1,
+                line_total=self.amount,
+            ))
 
         return products
 

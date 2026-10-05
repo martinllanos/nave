@@ -48,12 +48,29 @@ hoy se informa bien.
 el cliente perdería el dato de cuánto llevó. La descripción ya se recorta a 150 caracteres, así que
 el prefijo va primero para que no sea lo que se pierde al truncar.
 
+### El detalle viaja con impuestos incluidos
+
+Cada entrada del detalle informa lo que esa línea le cuesta al cliente con IVA (`price_total`), y el
+precio unitario se deriva de ahí dividiendo por la cantidad.
+
+*Por qué*: lo descubrieron los tests del punto anterior. El detalle se armaba con
+`price_reduce_taxexcl`, sin impuestos, mientras la intención se cobra por un importe con impuestos:
+una venta de $120 + IVA informaba productos por $120 y cobraba $145,20. Nunca se vio en homologación
+porque el catálogo de prueba no tiene impuestos configurados, así que ambos números coincidían.
+
+Es un desajuste preexistente, no introducido por este cambio, pero corregir la cantidad y dejar el
+IVA de lado habría dejado el detalle igual de incoherente por otro motivo. Mostrar precios finales es
+además cómo se le informan los precios al consumidor en Argentina.
+
+*Qué cambia para una venta normal*: tres unidades a $500 pasan a informarse como tres a $605. El
+cliente ve lo que paga por unidad.
+
 ### El redondeo se absorbe en el detalle, no en el importe
 
-El subtotal de una línea puede tener más decimales que los dos que Nave admite. El detalle se redondea
-a dos decimales, como ya se hace, pero el `amount` de la intención se sigue tomando del importe de la
-transacción y no de la suma del detalle. Si ambos difirieran por redondeo, manda el importe: es el que
-determina cuánto se cobra, y es el que Odoo concilia después.
+El total de una línea dividido por su cantidad puede no dar dos decimales exactos. El precio unitario
+se redondea a dos, pero el `amount` de la intención se sigue tomando del importe de la transacción y
+no de la suma del detalle. Si ambos difirieran por redondeo, manda el importe: es el que determina
+cuánto se cobra, y es el que Odoo concilia después.
 
 Dicho de otro modo: el requisito de que el detalle se corresponda con el importe se cumple a nivel de
 lo que el cliente lee, no como una identidad aritmética exacta que haría fallar un cobro por un

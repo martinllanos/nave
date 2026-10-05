@@ -10,7 +10,8 @@ lo que el cliente ve en el checkout y en su comprobante se corresponda con lo qu
 
 ### Requirement: El detalle de productos se corresponde con el importe que se cobra
 
-La intención de pago DEBE informar un detalle de productos cuya suma coincida con el importe cobrado.
+La intención de pago DEBE informar un detalle de productos cuya suma coincida con el importe cobrado,
+impuestos incluidos, salvo las diferencias de redondeo a dos decimales que impone el proveedor.
 
 Nave rechaza las cantidades fraccionarias y no valida que el detalle cuadre con el importe, así que
 una línea con cantidad no entera DEBE informarse de una forma que preserve esa correspondencia en
@@ -25,9 +26,15 @@ lugar de enviar la cantidad truncada junto al precio unitario original.
 
 #### Scenario: Línea con cantidad entera
 
-- **WHEN** se genera una intención para una línea de 3 unidades a $500,00, que se cobra $1.500,00
-- **THEN** el detalle informa 3 unidades a $500,00 cada una
-- **AND** el importe cobrado sigue siendo $1.500,00
+- **WHEN** se genera una intención para una línea de 3 unidades cuyo importe con impuestos es
+  $1.815,00
+- **THEN** el detalle informa 3 unidades a $605,00 cada una
+- **AND** el importe cobrado sigue siendo $1.815,00
+
+#### Scenario: La línea tiene impuestos
+
+- **WHEN** se genera una intención para una venta de $120,00 más $25,20 de impuestos
+- **THEN** la suma del detalle es $145,20, el mismo importe que se cobra
 
 #### Scenario: La cantidad fraccionaria proviene de una factura
 

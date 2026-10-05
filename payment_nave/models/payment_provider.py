@@ -66,6 +66,15 @@ class PaymentProvider(models.Model):
              "API rechace el link con 409 INVALID_POS.\n"
              "Si se deja vacío se usa el POS ID (Tienda), que es el comportamiento anterior.",
     )
+    nave_checkout_duration_minutes = fields.Integer(
+        string="Validez del checkout (minutos)",
+        default=50,
+        help="Tiempo que el cliente tiene para completar un pago iniciado desde la tienda, antes de "
+             "que Nave dé la intención por vencida.\n"
+             "Acortarlo hace que una compra abandonada se libere antes, pero también que a un "
+             "cliente lento se le venza el pago mientras lo está haciendo.\n"
+             "No aplica a los links de pago, que llevan su propio plazo al generarse.",
+    )
     nave_access_token = fields.Char(
         string="Cached Access Token",
         groups='base.group_system'
