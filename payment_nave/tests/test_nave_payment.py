@@ -848,10 +848,12 @@ class TestNaveProvider(PaymentCommon):
         Nave no dice cuál de los configurados está mal, así que sin esos dos datos diagnosticarlo
         obliga a reproducir el cobro.
         """
-        response = MagicMock(status_code=409)
+        # Cuerpo real capturado de la API el 2026-10-05, que difiere del ejemplo de la
+        # documentación: 400 en vez de 409, y el código en minúsculas dentro de `code`.
+        response = MagicMock(status_code=400)
         response.json.return_value = {
-            'code': '409', 'message': 'INVALID_POS',
-            'detail': 'Given POS is for a different payment type',
+            'code': 'invalid_pos',
+            'message': 'Given POS is for a different payment type',
         }
         mock_post.side_effect = requests.exceptions.HTTPError(response=response)
         self._nave_arm_token()
@@ -874,3 +876,26 @@ class TestNaveProvider(PaymentCommon):
         registrado = "\n".join(logs.output)
         self.assertIn('payment_link', registrado)
         self.assertIn('pos-link-cruzado', registrado)
+
+    def test_34_invalid_pos_is_recognised_in_both_shapes(self):
+        """El rechazo se reconoce tanto en la forma real como en la del ejemplo de la doc."""
+        provider = self.nave_provider
+        import requests as _requests
+
+        def _error(status, body):
+            resp = MagicMock(status_code=status)
+            resp.json.return_value = body
+            return _requests.exceptions.HTTPError(response=resp)
+
+        casos = [
+            ("real", _error(400, {'code': 'invalid_pos', 'message': 'Given POS is for a different payment type'})),
+            ("doc", _error(409, {'code': '409', 'message': 'INVALID_POS', 'detail': 'different payment type'})),
+        ]
+        for nombre, exc in casos:
+            with self.assertLogs('odoo.addons.payment_nave.models.payment_provider', 'ERROR') as logs:
+                provider._nave_log_invalid_pos(exc, 'payment_link', 'pos-x')
+            self.assertIn('pos-x', "\n".join(logs.output), f"forma {nombre} no reconocida")
+
+        # Un error ajeno no debe registrarse como problema de identidad.
+        otro = _error(400, {'code': 'not_found', 'message': 'Payment request not found'})
+        provider._nave_log_invalid_pos(otro, 'payment_link', 'pos-x')

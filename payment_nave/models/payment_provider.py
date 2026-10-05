@@ -199,18 +199,27 @@ class PaymentProvider(models.Model):
     def _nave_log_invalid_pos(self, exc, payment_type, pos_id):
         """ Deja rastro de qué medio y qué `pos_id` produjeron un rechazo por identidad.
 
-        Nave responde `409 INVALID_POS` — "Given POS is for a different payment type" — sin decir
-        cuál de los identificadores configurados está mal. Sin estos dos datos, diagnosticarlo
-        obliga a reproducir el cobro.
+        Nave rechaza la intención cuyo `pos_id` pertenece a otro medio sin decir cuál de los
+        identificadores configurados está mal. Sin estos dos datos, diagnosticarlo obliga a
+        reproducir el cobro.
+
+        La respuesta real difiere del ejemplo de la documentación —que muestra `409` con
+        `message: "INVALID_POS"`, mientras la API devuelve `400` con `code: "invalid_pos"`— así que
+        el reconocimiento no se apoya en el código HTTP ni en una sola clave.
         """
         response = getattr(exc, 'response', None)
-        if response is None or response.status_code != 409:
+        if response is None:
             return
         try:
-            code = (response.json() or {}).get('message')
+            payload = response.json()
         except ValueError:
-            code = None
-        if code != 'INVALID_POS':
+            return
+        if not isinstance(payload, dict):
+            return
+        marcas = ' '.join(
+            str(payload.get(k) or '') for k in ('code', 'message', 'detail')
+        ).lower()
+        if 'invalid_pos' not in marcas:
             return
         _logger.error(
             "[payment_nave] Nave rechazó la intención por identidad: medio '%s', pos_id '%s'. "
