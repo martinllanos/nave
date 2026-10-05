@@ -18,7 +18,7 @@
 - [x] 2.1 Subir la versión del módulo. Verificar: el manifiesto declara la versión nueva.
 - [x] 2.2 Correr la suite de `payment_nave` y `pos_nave`, más flake8 y bandit según `.agent/rules.md`
       §6. Verificar: 0 fallos, 0 errores de lint y 0 hallazgos de severidad media o superior.
-- [ ] 2.3 Desplegar y recorrer la tienda de homologación hasta la pantalla de pago de Nave.
+- [x] 2.3 Desplegar y recorrer la tienda de homologación hasta la pantalla de pago de Nave.
       Verificar: el checkout muestra el importe y el detalle de la compra en lugar de una pantalla en
       blanco, y queda registrado como caso de la matriz para que el recorrido completo no vuelva a
       quedar sin probar.

@@ -488,9 +488,22 @@ Es la lección más cara del día: *un camino que no se recorre entero no está 
 que esté la suite*.
 
 **Corregido** en `18.0.1.11.1`: los parámetros viajan como campos ocultos, que es la parte que el
-envío GET conserva, y se leen de la URL que Nave devuelve en vez de darse por sabidos. Verificado
-enviando el formulario renderizado contra la misma intención que había fallado: la URL llega
-completa y el checkout muestra el detalle.
+envío GET conserva, y se leen de la URL que Nave devuelve en vez de darse por sabidos.
+
+**Verificado con el código desplegado**, rehaciendo el recorrido entero de la tienda. El navegador
+llega a `…/nave?payment_request_id=c05e5845-82dd-4b2e-9d6e-acf0b5550fb8` y el checkout carga:
+
+```
+1x [PRUEBA] Precio ...      $123,45
+2x [PRUEBA] Cobro  ...       $50,00
+1x [PRUEBA] Cuotas ...    $1.150,00
+1x Envío estándar             $0,00
+Total                     $ 1.373,45
+```
+
+El primer intento de ese mismo recorrido devolvió `Read timed out` contra `api-sandbox.ranty.io`: el
+sandbox corta de a ratos y el timeout de 15 s no siempre alcanza. Vale notar que el cliente **ve el
+error** en un diálogo en lugar de quedarse esperando, y que al reintentar salió bien.
 
 #### De paso, A0 y A1 quedan cerrados
 
