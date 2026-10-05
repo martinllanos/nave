@@ -458,6 +458,68 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.22 🔴 Nadie podía pagar desde la tienda (2026-10-05)
+
+El recorrido que hace un cliente de verdad —entrar al sitio, armar el carrito, cargar la dirección,
+elegir el medio de pago y apretar "Pagar ahora"— **se ejecutó por primera vez el 2026-10-05**, con el
+navegador. Falló en el primer intento.
+
+Odoo creó la intención y guardó bien su URL. El navegador llegó a otra:
+
+```
+nave_checkout_url guardado   → …/nave?payment_request_id=f9d279b1-a6d3-4135-bec6-a570035b9c51
+location.href tras el submit → …/nave
+```
+
+Sin el identificador, Nave no sabe qué intención mostrar y deja una pantalla en blanco. El pedido
+S00030 ($223,45) quedó esperando un pago que el cliente no tenía forma de completar.
+
+**La causa.** La plantilla de redirección era `<form t-att-action="api_url" method="get">` sin
+campos. Cuando un formulario con `method="get"` se envía, el algoritmo de submit del HTML **descarta
+el query string de la acción** y lo reemplaza por la serialización de los campos. Sin campos, el
+parámetro se perdía entre Odoo y Nave. Es comportamiento estándar, no un defecto del navegador.
+
+**Por qué nadie lo vio.** Los 79 tests miran el payload que se le manda a Nave, y el defecto vive en
+el salto del navegador. Y todas las pruebas de la matriz ejecutadas hasta ese día —A4, A6, A8, A9,
+A13— se hicieron abriendo el `checkout_url` directamente, que es justamente el tramo que funcionaba.
+Los dos casos que sí cubrían el recorrido, **A0 y A1, estaban sin ejecutar**.
+
+Es la lección más cara del día: *un camino que no se recorre entero no está probado, por más verde
+que esté la suite*.
+
+**Corregido** en `18.0.1.11.1`: los parámetros viajan como campos ocultos, que es la parte que el
+envío GET conserva, y se leen de la URL que Nave devuelve en vez de darse por sabidos. Verificado
+enviando el formulario renderizado contra la misma intención que había fallado: la URL llega
+completa y el checkout muestra el detalle.
+
+#### De paso, A0 y A1 quedan cerrados
+
+El checkout del sitio lista **los dos medios**, "QR Interoperable Nave" y "Tarjeta", ambos con el
+sello *"Asegurado por Nave"*. Eso **descarta B7**, que anticipaba que sólo aparecería QR.
+
+El hosted checkout ofrece a su vez las dos formas: "Código QR" para billeteras y el formulario de
+tarjeta, con nombre, documento y correo del comprador ya precargados desde el `buyer` que mandamos.
+A2–A6 son ejecutables tal como están redactados.
+
+El detalle que ve el cliente, con el pedido armado desde el carrito real:
+
+```
+1x [PRUEBA] Precio ...   $123,45
+2x [PRUEBA] Cobro  ...    $50,00
+1x Envío estándar          $0,00
+Total                    $ 223,45
+```
+
+La línea de cantidad 2 se informa como `2x` a $50,00, el envío viaja como su propia línea, y la suma
+coincide con el importe. El arreglo de §3.20 queda así confirmado también en el flujo real.
+
+#### Lo que el carrito no deja hacer
+
+El carrito web no admite cantidades fraccionarias: con `0,15` —y también con `0.15`— Odoo la
+interpreta como cero y elimina la línea. O sea que **la venta a granel no es comprable desde la
+tienda**. Es de `website_sale`, no de `payment_nave`, pero conviene tenerlo presente si el negocio
+piensa vender por peso online.
+
 ### 3.21 A6 cerrado y el endpoint de devolución ubicado (2026-10-05)
 
 **A6 con un importe que admite cuotas.** El primer intento de A6 se rechazó por
@@ -1256,8 +1318,8 @@ deciden cómo se escribe el fix de B11.
 
 | ID | Caso | Pasos | Resultado esperado | Estado |
 |---|---|---|---|---|
-| A1 | Métodos visibles en checkout | Carrito → Pagar | Se listan los métodos habilitados de Nave. **Hoy se espera que sólo aparezca QR** (B7) | ⬜ |
-| A0 | ⚠️ Forma de pago en sandbox | Llegar al hosted checkout y ver qué ofrece | ¿Formulario de tarjeta, o sólo QR para escanear con billetera? **Define si A2-A6 son ejecutables como están redactados** (N11, §3.9.f) | ⬜ |
+| A1 | Métodos visibles en checkout | Carrito → Pagar | Se listan los métodos habilitados de Nave | ✅ 2026-10-05: aparecen **"QR Interoperable Nave"** y **"Tarjeta"**, ambos con el sello "Asegurado por Nave". B7 queda descartado. §3.22 |
+| A0 | ⚠️ Forma de pago en sandbox | Llegar al hosted checkout y ver qué ofrece | ✅ 2026-10-05: ofrece **las dos cosas**, "Código QR" e "Ingresá los datos" de tarjeta, con los datos del comprador precargados desde nuestro `buyer`. A2–A6 son ejecutables tal como están redactados. §3.22 |
 | A2 | Pago aprobado con tarjeta Naranja | Carrito → Nave → `5895 6248 4026 3355` | Redirige a `checkout_url`, vuelve a `/payment/status`, webhook llega, tx `done`, pedido confirmado. **Tiene precedente: ya pasó el 2026-08-11 (§4.2)** | ⬜ |
 | A3 | Pago aprobado con Visa 1 cuota | `4025 2200 0000 0139` | Ídem A2 | ⬜ |
 | A4 | Pago aprobado con Visa 6 cuotas | `4761 2299 9900 0231` | Ídem A2 + verificar que el plan de cuotas queda registrado | ⬜ |
