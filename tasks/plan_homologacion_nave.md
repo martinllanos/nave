@@ -1232,7 +1232,7 @@ deciden cómo se escribe el fix de B11.
 | A17 | Rechazo tardío sobre un cobro aprobado | Simular la llegada de un webhook `REJECTED` después de uno `APPROVED` | La transacción sigue en `done` y conserva el `payment_id` del pago aprobado. Queda advertencia en el log | ⬜ |
 | A14 | Devolución total desde backend 🔴 | Factura pagada → botón Reembolsar | `DELETE /api/payments/{id}` → `CANCELLING`, tx hija creada. Odoo **no debe ofrecer monto parcial** (`full_only`, N10). 🚫 Hoy el botón no existe (B6) | ⬜ |
 | A15 | Cierre del ciclo de devolución 🔴 | Tras A14, esperar el webhook `REFUNDED` | La transacción y la factura reflejan la devolución. 🚫 Hoy el webhook **no cambia nada** (B6.4) | ⬜ |
-| A13 | Cantidad fraccionaria | Línea con qty 0,15 kg × $800 | `int(qty) or 1` → se envía 1 (`:161`). Verificar impacto | 🔴 2026-10-05, S00020: **el detalle no cuadra con el cobro**. Nave recibió `quantity: 1 × $800,00` y cobró $120,00. §3.20 |
+| A13 | Cantidad fraccionaria | Línea con qty 0,15 kg × $800 | `int(qty) or 1` → se envía 1 (`:161`). Verificar impacto | ✅ 2026-10-05: corregido y verificado contra sandbox. Nave recibe `quantity: 1 × $120,00` con la cantidad real en la descripción, y el detalle suma lo cobrado. §3.20 |
 
 ### Bloque B — Link de pago
 

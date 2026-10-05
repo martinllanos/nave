@@ -40,6 +40,6 @@
       Verificar: el manifiesto declara la versión nueva.
 - [x] 4.2 Correr la suite de `payment_nave` y `pos_nave`, más flake8 y bandit según `.agent/rules.md`
       §6. Verificar: 0 fallos, 0 errores de lint y 0 hallazgos de severidad media o superior.
-- [ ] 4.3 Generar contra sandbox una intención con una línea fraccionaria y confirmar el payload real.
+- [x] 4.3 Generar contra sandbox una intención con una línea fraccionaria y confirmar el payload real.
       Verificar: `GET /api/payment_requests/{id}` devuelve un detalle cuyo importe coincide con el
       cobrado, y el caso A13 de la matriz pasa a ✅.
