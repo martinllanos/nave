@@ -458,6 +458,44 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.27 El cobro presencial funciona de punta a punta (2026-10-06)
+
+Primer cobro con la terminal física, ya en producción. Orden `POS 1/0001` por $50,00: el monto salió
+del Punto de Venta de Odoo, apareció en la terminal, se pagó con tarjeta y volvió. Evidencia en
+`docs/homologacion/evidencias/C0/`.
+
+**C0 — el cobro llega a la terminal correcta.** El cupón impreso dice `Terminal Nº: L40037644`, que
+es el dispositivo del `pos_id` configurado. Queda descartada la duda de §3.5 sobre el `pos_id`
+duplicado: ahora cada medio tiene el suyo.
+
+**C2 — la orden se cierra sola.** Quedó facturada (`FA-C 00001-00000004`) con los $50 cobrados y el
+`transaction_id` guardado. Se pagó por **NFC**, no insertando el chip como decía el caso.
+
+**C12 — el ticket sí lleva los datos.** La matriz anticipaba que `set_receipt_info()` no se llamaba y
+el ticket salía vacío. No es así:
+
+```
+Tarjeta: AMERICAN EXPRESS ****2385
+Tipo: CREDIT
+Cupón: FYK207529681
+Autorización: 909827
+Lote: 1
+Emisor: BANCO MARIVA S.A.
+```
+
+#### Odoo guarda más de lo que la terminal imprime
+
+| Cupón de la terminal | Línea de pago en Odoo |
+|---|---|
+| AMERICAN EXPRESS CREDIT 2385 | `card_brand`, `card_no`, `card_type` |
+| Código de operación FYK207529681 | en el ticket |
+| TRC 909827 | `payment_method_authcode` |
+| — | `payment_method_issuer_bank` = BANCO MARIVA S.A. |
+| — | `payment_method_payment_mode` = `nfc` |
+
+El emisor y el modo de lectura no figuran en el papel y sí quedan en el sistema, que es justamente lo
+que sirve para atender un reclamo.
+
 ### 3.26 El bloque A queda cerrado, salvo las devoluciones (2026-10-06)
 
 Cuatro cobros más contra sandbox cierran el bloque de cobros online. Comprobantes de Nave en
@@ -1504,9 +1542,9 @@ deciden cómo se escribe el fix de B11.
 
 | ID | Caso | Pasos | Resultado esperado | Estado |
 |---|---|---|---|---|
-| C0 | Ruteo a la terminal correcta 🔴 | Lanzar un cobro con el `pos_id` actual | El cobro **aparece en la terminal `L40000978`**. Si no aparece, el `pos_id` es el de e-commerce (§3.5) y hay que pedirle a Nave el de la terminal | ⬜ |
+| C0 | Ruteo a la terminal correcta 🔴 | Lanzar un cobro con el `pos_id` actual | El cobro **aparece en la terminal `L40000978`**. Si no aparece, el `pos_id` es el de e-commerce (§3.5) y hay que pedirle a Nave el de la terminal |✅ 2026-10-06: el cobro apareció en la terminal **L40037644**, la del `pos_id` configurado. §3.27 |
 | C1 | Contrato de estados 🔴 | Cobrar y capturar la respuesta cruda de `GET /api/payment_requests/{id}` | Documentar la forma exacta de `status` y el catálogo completo de valores. **Todo el polling depende de una suposición del código** (`payment_nave.js:124`: *"suponiendo estructura {status:{name:...}}"*) | ✅ 2026-10-05: forma capturada en §3.20. La suposición es correcta en la intención, pero **no** dentro de `payment_attempts` |
-| C2 | Cobro aprobado con chip | Orden POS → Tarjeta → insertar chip → aprobar | Línea `done`, orden validada, `transaction_id` guardado | ⬜ |
+| C2 | Cobro aprobado con chip | Orden POS → Tarjeta → insertar chip → aprobar | Línea `done`, orden validada, `transaction_id` guardado |✅ 2026-10-06, POS 1/0001: línea cobrada, orden facturada (`FA-C 00001-00000004`) y `transaction_id` guardado. Se pagó por **NFC**, no por chip. §3.27 |
 | C3 | Cobro rechazado | Tarjeta de rechazo en la terminal | Diálogo con el `reason_code`, línea en `retry`, el cajero puede reintentar | ⬜ |
 | C4 | Cancelación desde Odoo | Iniciar cobro → botón Cancel | `DELETE` a Nave y la **terminal vuelve a reposo**. Ojo: `send_payment_cancel` retorna `true` siempre, incluso si el DELETE falló (`payment_nave.js:185-190`) | ⬜ |
 | C5 | Cancelación desde la terminal | Iniciar cobro → cancelar en el equipo | Nave notifica `DISABLED` con `manual_disabled_by_user`. **Se espera loop infinito** (B4) | ⬜ |
@@ -1516,7 +1554,7 @@ deciden cómo se escribe el fix de B11.
 | C9 | "Force done" con pago rechazado | Rechazar en la terminal y presionar Force done | La venta se cierra como cobrada sin cobro real. **Hallazgo a documentar y mitigar** | ⬜ |
 | C10 | Terminal ocupada | Lanzar un cobro con otro en curso | `device_already_on_payment_flow` (`doc_point.md` §6). Verificar el mensaje al cajero | ⬜ |
 | C11 | Terminal con batería < 5% | Descargar la terminal | `low_battery`. Verificar manejo | ⬜ |
-| C12 | Datos en el ticket | Cobro aprobado → imprimir | **Hoy no se llama a `set_receipt_info()`**: el ticket no imprime marca, últimos 4 ni cupón, aunque la API los devuelve (`doc_point.md:104-138`). Confirmar si Nave lo exige | ⬜ |
+| C12 | Datos en el ticket | Cobro aprobado → imprimir | **Hoy no se llama a `set_receipt_info()`**: el ticket no imprime marca, últimos 4 ni cupón, aunque la API los devuelve (`doc_point.md:104-138`). Confirmar si Nave lo exige |✅ 2026-10-06: el ticket sí se completa. Lleva marca, últimos cuatro, tipo, cupón, autorización, lote y emisor. §3.27 |
 | C13 | Devolución desde POS | Orden de devolución → Tarjeta | 🚫 Falla por B2/B3 (`REFUND-CIEGO`) | ⬜ |
 | C14 | Webhook de baja de intención | Provocar un `DISABLED` | Es un **segundo contrato de webhook** con payload distinto (`payment_request_id`, `disabled_reason`, `doc_point.md` §8) que el módulo **no maneja** | ⬜ |
 | C15 | Cierre de caja | Cerrar la sesión POS con cobros Nave | Los pagos quedan en el diario del método. No hay conciliación contra Nave | ⬜ |
