@@ -4,9 +4,9 @@
 **De:** Be onlyone
 **Fecha:** 2026-10-06
 
-Este documento reúne lo que necesitamos de ustedes para publicar los tres módulos de integración con
-Odoo en **apps.odoo.com**. Está ordenado por tema y cada pedido indica para qué se usa, de modo que
-puedan responderlo de una sola vez.
+Este documento reúne lo que necesitamos de ustedes para publicar en **apps.odoo.com** los dos
+módulos de integración con Odoo que les entregamos. Está ordenado por tema y cada pedido indica para
+qué se usa, de modo que puedan responderlo de una sola vez.
 
 Los módulos son:
 
@@ -14,7 +14,6 @@ Los módulos son:
 |---|---|
 | **Proveedor de Pago Nave** | Cobros online: checkout del e-commerce y links de pago sobre facturas |
 | **Punto de Venta Nave** | Cobros presenciales: terminal Nave Point y QR interoperable |
-| **Simulador Cuotas Nave** | Cálculo de recargos financieros y precios finales por cuotas |
 
 ---
 
@@ -23,7 +22,7 @@ Los módulos son:
 No hace falta que respondan nada de esto; va listado para que quede constancia del encuadre.
 
 - **Publican ustedes**, desde su cuenta de Odoo Apps.
-- **Nave figura como autor** de los tres módulos.
+- **Nave figura como autor** de los dos módulos.
 - **Distribución gratuita.** Por lo tanto no aplica el precio mínimo que Odoo exige a las apps pagas
   ni la regla de que el precio allí no supere el de otros canales.
 - **Soporte en niveles**: Nave atiende primer y segundo nivel; Be onlyone toma el tercero. Odoo no
@@ -37,11 +36,11 @@ realmente falta.
 
 | Requisito de Odoo | Estado |
 |---|---|
-| El nombre de la app no supera los 25 caracteres | ✅ 22, 19 y 21 |
-| La página de descripción está en inglés (obligatorio) | ✅ en los tres |
-| La página de descripción no usa JavaScript (prohibido) | ✅ en los tres |
-| Cada módulo tiene su icono | ✅ en los tres |
-| La licencia está declarada | ✅ LGPL-3 en los tres |
+| El nombre de la app no supera los 25 caracteres | ✅ 22 y 19 |
+| La página de descripción está en inglés (obligatorio) | ✅ en los dos |
+| La página de descripción no usa JavaScript (prohibido) | ✅ en los dos |
+| Cada módulo tiene su icono | ✅ en los dos, en PNG y SVG |
+| La licencia está declarada | ✅ LGPL-3 en los dos |
 
 ---
 
@@ -106,7 +105,7 @@ descripción.
 
 ### Sobre la licencia
 
-Hoy los tres módulos declaran **LGPL-3**, que es lo habitual para una app gratuita en Odoo. Conviene
+Hoy los dos módulos declaran **LGPL-3**, que es lo habitual para una app gratuita en Odoo. Conviene
 que lo confirmen porque tiene una consecuencia concreta:
 
 - **LGPL-3** permite que cualquiera tome el módulo, lo modifique y lo redistribuya, incluso un
@@ -124,23 +123,20 @@ que revisar el esquema completo, porque afecta si la app puede seguir siendo gra
 Esta tabla muestra qué declara hoy cada módulo y qué pasaría a declarar con sus respuestas. Sirve
 para ver el efecto concreto de cada dato que pedimos.
 
-| Dato | Proveedor de Pago Nave | Punto de Venta Nave | Simulador Cuotas Nave |
-|---|---|---|---|
-| Autor | `Be onlyone` → **Nave** | `Be onlyone` → **Nave** | `Martin` → **Nave** |
-| Sitio web | `onlyone.odoo.com` → **el de Nave** | `onlyone.odoo.com` → **el de Nave** | *no declarado* → **el de Nave** |
-| Soporte | *no declarado* → **canal de Nave** | *no declarado* → **canal de Nave** | *no declarado* → **canal de Nave** |
-| Licencia | `LGPL-3` (a confirmar) | `LGPL-3` (a confirmar) | `LGPL-3` (a confirmar) |
-| Imagen de portada | *sólo el icono* → **portada propia** | *no declarada* → **portada propia** | *no declarada* → **portada propia** |
+| Dato | Proveedor de Pago Nave | Punto de Venta Nave |
+|---|---|---|
+| Autor | `Be onlyone` → **Nave** | `Be onlyone` → **Nave** |
+| Sitio web | `onlyone.odoo.com` → **el de Nave** | `onlyone.odoo.com` → **el de Nave** |
+| Soporte | *no declarado* → **canal de Nave** | *no declarado* → **canal de Nave** |
+| Licencia | `LGPL-3` (a confirmar) | `LGPL-3` (a confirmar) |
+| Imagen de portada | *sólo el icono* → **portada propia** | *no declarada* → **portada propia** |
 
 ## Tareas nuestras, para su información
 
 No requieren nada de ustedes; las resolvemos al integrar el material.
 
-- Unificar el tamaño de los iconos: hoy son 512×512 y 1024×1024 según el módulo.
-- Corregir el icono del Simulador, que es un archivo JPEG con extensión `.png`. Odoo espera un PNG, y
-  el formato actual además no admite fondo transparente.
-- Unificar el autor del Simulador, que quedó distinto al de los otros dos.
-- Declarar la imagen de portada en los tres módulos.
+- Unificar el tamaño de los iconos: hoy son 512×512 en uno y 1024×1024 en el otro.
+- Declarar la imagen de portada en los dos módulos.
 
 ---
 
@@ -152,3 +148,14 @@ avanzar.
 
 Ante cualquier duda sobre qué es exactamente lo que se pide o para qué se usa, escríbannos y lo
 aclaramos.
+
+---
+
+## Alcance de esta entrega
+
+Este documento cubre **únicamente** los dos módulos listados al principio, que son los que les
+entregamos y publican ustedes.
+
+Be onlyone desarrolla además un tercer módulo, un simulador de cuotas y precios finales, que
+complementa a estos dos pero **no forma parte de la entrega**: es un producto propio y su publicación
+corre por nuestra cuenta.

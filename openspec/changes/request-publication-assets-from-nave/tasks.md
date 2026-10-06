@@ -2,10 +2,10 @@
 
 ## 1. El inventario de lo que hay
 
-- [x] 1.1 Relevar de los tres manifiestos los campos que cambian al publicar bajo la cuenta de Nave
-      —`author`, `website`, `license`, `support` y los que falten— y armar una tabla por módulo con
-      lo que declara hoy y lo que pasaría a declarar. Verificar: la tabla cubre los tres módulos y
-      señala la inconsistencia del autor en `sale_nave_simulator`, que hoy dice `Martin`.
+- [x] 1.1 Relevar de los manifiestos entregados los campos que cambian al publicar bajo la cuenta de
+      Nave —`author`, `website`, `license`, `support` y los que falten— y armar una tabla por módulo
+      con lo que declara hoy y lo que pasaría a declarar. Verificar: la tabla cubre `payment_nave` y
+      `pos_nave`, que son los dos que se entregan.
 - [x] 1.2 Dejar listado lo que ya cumple las reglas de Odoo, con el dato que lo respalda. Verificar:
       el largo real de cada nombre, que las tres páginas de descripción están en inglés y sin
       JavaScript, y qué iconos existen en cada módulo.

@@ -2,9 +2,10 @@
 
 ## Why
 
-Los tres módulos se van a publicar en Odoo Apps Store **bajo la cuenta de Nave Negocios y con ellos
-como autor**, pero los manifiestos siguen declarando `'author': 'Be onlyone'` y un sitio web que no
-es el de ellos. Hay material que sólo Nave puede aportar: su logo oficial, sus textos y el canal de
+`payment_nave` y `pos_nave` se van a publicar en Odoo Apps Store **bajo la cuenta de Nave Negocios y
+con ellos como autor**, pero los manifiestos siguen declarando `'author': 'Be onlyone'` y un sitio
+web que no es el de ellos. `sale_nave_simulator` queda fuera: es un producto propio de Be onlyone que
+complementa a los otros dos, y lo publicamos nosotros. Hay material que sólo Nave puede aportar: su logo oficial, sus textos y el canal de
 soporte que quieran publicar.
 
 Nada de eso se puede resolver del lado del desarrollo, y sin eso la publicación no avanza. Pedirlo
@@ -21,8 +22,8 @@ oficial.
 
 - Se agrega un **documento de requerimientos** dirigido a Nave, con los datos, el material y las
   decisiones que hacen falta para publicar, agrupados por tema y con el motivo de cada pedido.
-- El documento incluye un **inventario del estado actual** de los tres manifiestos, de modo que se
-  vea qué queda como está y qué cambia con cada respuesta.
+- El documento incluye un **inventario del estado actual** de los dos manifiestos entregados, de modo
+  que se vea qué queda como está y qué cambia con cada respuesta.
 - Se deja constancia de lo ya verificado contra las reglas de Odoo, para no pedir lo que ya cumple.
 
 No se modifica ningún módulo. Los manifiestos se actualizan cuando lleguen las respuestas, en un
@@ -42,18 +43,18 @@ cambio aparte.
 ## Impact
 
 - Un documento nuevo bajo `docs/`.
-- Sin impacto en `payment_nave`, `pos_nave` ni `sale_nave_simulator`: no se toca código, manifiestos
-  ni assets.
+- Sin impacto en `payment_nave` ni `pos_nave`: no se toca código, manifiestos ni assets.
+- `sale_nave_simulator` queda fuera del alcance: no se entrega a Nave.
 
 ### Lo que ya cumple (verificado el 2026-10-06)
 
 | Requisito de Odoo | Estado |
 |---|---|
-| Nombre de la app ≤ 25 caracteres | ✅ 22, 19 y 21 |
-| Página de descripción en inglés | ✅ las tres |
-| Sin JavaScript en la página de descripción | ✅ las tres |
-| Icono presente | ✅ `icon.png` en los tres; `icon.svg` en dos |
-| Licencia declarada | ✅ LGPL-3 en los tres |
+| Nombre de la app ≤ 25 caracteres | ✅ 22 y 19 |
+| Página de descripción en inglés | ✅ las dos |
+| Sin JavaScript en la página de descripción | ✅ las dos |
+| Icono presente | ✅ `icon.png` y `icon.svg` en los dos |
+| Licencia declarada | ✅ LGPL-3 en los dos |
 
 ### Lo que falta y sólo Nave puede dar
 

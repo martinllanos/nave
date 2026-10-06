@@ -13,9 +13,9 @@
 
 Hola, buen día.
 
-Les escribo desde **Be onlyone**. Como quedamos, los tres módulos de integración con Odoo se van a
-publicar en **apps.odoo.com desde la cuenta de ustedes**, figurando Nave como autor y con
-distribución gratuita.
+Les escribo desde **Be onlyone**. Como quedamos, los dos módulos de integración con Odoo —el de
+cobros online y el de punto de venta— se van a publicar en **apps.odoo.com desde la cuenta de
+ustedes**, figurando Nave como autor y con distribución gratuita.
 
 Para eso necesitamos material y datos que sólo pueden aportar ustedes: el logo y el icono oficiales,
 los textos de la ficha, el canal de soporte que quieran publicar y algunos datos de identidad que
