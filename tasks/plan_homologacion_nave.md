@@ -458,6 +458,58 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.26 El bloque A queda cerrado, salvo las devoluciones (2026-10-06)
+
+Cuatro cobros más contra sandbox cierran el bloque de cobros online. Comprobantes de Nave en
+`docs/homologacion/evidencias/<caso>/`.
+
+| Caso | Resultado |
+|---|---|
+| A3 | VISA CREDIT ****0139, 1 cuota, cupón `GDP476968633` → `done` |
+| A4 | VISA CREDIT ****0231, **6 cuotas**, cupón `NPA855612747` → `done` |
+| A5 | Rechazo `no_amount_available` → `cancel`, sin asientos |
+| A16 | Rechazo y luego aprobación sobre la misma intención → `done` |
+
+**A4 muestra para qué sirvió registrar la financiación.** La venta es de $1.150 y el cliente pagó
+**$1.364,66** en 6 cuotas de $227,44, con tasa 13%, TNA 63% y CFT 18,67%. Antes del cambio de §3.18
+nada de eso quedaba en Odoo.
+
+#### El comprobante de Nave concilia con lo registrado
+
+El cliente descarga un comprobante al terminar de pagar. El de A4 coincide campo por campo con lo que
+guardó la transacción:
+
+| Comprobante de Nave | Odoo |
+|---|---|
+| Total $1.364,66 | `nave_customer_total` = 1364.66 |
+| `**** 0231` Visa | VISA CREDIT ****0231 |
+| Cuotas: 06 de 227.44 | 6 cuotas |
+| Referencia: A4-S00040 | misma referencia |
+| Código de operación: NPA855612747 | `nave_payment_code` |
+| Medio de cobro: E-Commerce | intención de tipo `ecommerce` |
+
+Es la prueba de conciliación que conviene mostrar: lo que el cliente tiene en la mano y lo que el
+comercio tiene en el sistema dicen lo mismo.
+
+#### A16 verifica contra la API el defecto más grave que apareció
+
+Era el que motivó el cambio `recover-transaction-on-later-approval`. Pagando primero con la tarjeta
+de rechazo y después, con **"Volver a intentar"**, con la aprobada, la intención terminó con dos
+pagos —`REJECTED` y `APPROVED`— y la transacción quedó en `done` con el mensaje *"Tras un intento
+rechazado previamente — Pago aprobado…"*. Antes del arreglo esa aprobación se descartaba y quedaba un
+cobro real sin registrar.
+
+#### A17: un rechazo que llega tarde no pisa la aprobación
+
+Aprovechando que A16 dejó los dos pagos en la misma intención, se reenvió el webhook del **rechazado**
+sobre la transacción ya aprobada. Siguió en `done`, con el pago aprobado registrado. Cumple el
+requisito *un desenlace no se pisa con información más vieja*.
+
+#### Lo que queda del bloque A
+
+Sólo **A14 y A15**, las devoluciones, que siguen esperando que Nave habilite el permiso sobre
+`DELETE /api/payments/{id}` (§3.21).
+
 ### 3.24 El link de pago está bloqueado en sandbox por el `pos_id` (2026-10-05)
 
 Primer intento de generar un link de pago desde un pedido de venta del backend, con el wizard tal
@@ -1412,19 +1464,19 @@ deciden cómo se escribe el fix de B11.
 | A1 | Métodos visibles en checkout | Carrito → Pagar | Se listan los métodos habilitados de Nave | ✅ 2026-10-05: aparecen **"QR Interoperable Nave"** y **"Tarjeta"**, ambos con el sello "Asegurado por Nave". B7 queda descartado. §3.22 |
 | A0 | ⚠️ Forma de pago en sandbox | Llegar al hosted checkout y ver qué ofrece | ✅ 2026-10-05: ofrece **las dos cosas**, "Código QR" e "Ingresá los datos" de tarjeta, con los datos del comprador precargados desde nuestro `buyer`. A2–A6 son ejecutables tal como están redactados. §3.22 |
 | A2 | Pago aprobado con tarjeta Naranja | Carrito → Nave → `5895 6248 4026 3355` | Redirige a `checkout_url`, vuelve a `/payment/status`, webhook llega, tx `done`, pedido confirmado | ✅ 2026-10-05, S00030-2: el circuito entero, carrito a asiento contable. §3.23 |
-| A3 | Pago aprobado con Visa 1 cuota | `4025 2200 0000 0139` | Ídem A2 | ⬜ |
-| A4 | Pago aprobado con Visa 6 cuotas | `4761 2299 9900 0231` | Ídem A2 + verificar que el plan de cuotas queda registrado | ⬜ |
-| A5 | Rechazo por fondos | `4025 2200 0000 0127` | tx → `cancel` con el `reason_code` de Nave en el chatter | ⬜ |
+| A3 | Pago aprobado con Visa 1 cuota | `4025 2200 0000 0139` | Ídem A2 | ✅ 2026-10-06: `done`, VISA CREDIT ****0139, 1 cuota, cupón `GDP476968633` |
+| A4 | Pago aprobado con Visa 6 cuotas | `4761 2299 9900 0231` | Ídem A2 + verificar que el plan de cuotas queda registrado | ✅ 2026-10-06: venta $1.150, el cliente pagó **$1.364,66** en 6 cuotas (tasa 13%, TNA 63%, CFT 18,67%). Todo registrado. §3.26 |
+| A5 | Rechazo por fondos | `4025 2200 0000 0127` | tx → `cancel` con el `reason_code` de Nave | ✅ 2026-10-06: `cancel` con motivo `no_amount_available`, pedido sin confirmar, 0 asientos |
 | A6 | Rechazo Naranja | `5895 6248 9347 1379` | Ídem A5 | ✅ 2026-10-05, S00024 ($1.150): rechazo de tarjeta genuino (`no_amount_available`) → `cancel`, sin asiento, pedido sin confirmar. §3.21 |
 | A7 | Abandono del checkout | Llegar a Nave y cerrar la pestaña | tx queda `draft`, el pedido no se confirma, sin asientos | ✅ 2026-10-06: `draft`, pedido sin confirmar, 0 asientos, y en Nave `PENDING` con 0 intentos. El cron la cierra al expirar (§3.19) |
 | A8 | Expiración de la intención | Crear intención y esperar los 3000 s del `duration_time` hardcodeado (`payment_transaction.py:85`) | Nave marca `EXPIRED` y el cron de conciliación deja la transacción en Cancelado con el motivo a la vista | ✅ 2026-10-05, §3.19 |
 | A9 | Monto con decimales | Pedido por $123,45 (tope de homologación) | `amount.value == "123.45"` (string, 2 decimales) en el payload | ✅ 2026-10-05, S00019: $123,45 exacto hasta el asiento contable, sin redondeos. §3.20 |
 | A10 | Cliente sin CUIT ni email | Partner incompleto | Se envían los defaults `'00000000'` / `'correo@temporal.com'` y dirección `S/D`. Confirmar que Nave los acepta | ✅ 2026-10-06: **Nave los acepta** y el checkout carga normal. Un cliente sin datos puede comprar |
 | A11 | CUIT con guiones | Partner con `20-05536168-2` | El módulo no limpia guiones. Verificar si Nave lo rechaza | ✅ 2026-10-06: **Nave acepta el CUIT con guiones** tal cual se envía. No hace falta limpiarlo |
-| A12 | Descuadre productos vs total | Pedido con IVA | Los `products[]` van **sin IVA** (`price_reduce_taxexcl`, `:157`) pero `amount` **con** IVA. Confirmar que Nave no valida la suma | ⬜ |
-| A18 | Datos del cobro registrados | Tras un cobro aprobado, abrir la transacción en Odoo | Figuran marca, tipo, últimos cuatro, emisor, cupón, autorización y lote. Si hubo cuotas, también el plan y el total pagado por el cliente. El mensaje del documento describe el medio sin mencionar billetera en un pago con tarjeta | ⬜ |
-| A16 | 🔴 Rechazo seguido de aprobación | Pagar con tarjeta de rechazo, y en la misma pantalla usar "Volver a intentar" con una aprobada | La transacción termina en **`done`**, el pedido se confirma, y el chatter muestra el rechazo y la recuperación en orden. **Observado roto el 2026-10-05 (S00005)**: Odoo descartaba la aprobación y dejaba la transacción en `cancel` con un cobro real sin registrar. Corregido por el cambio `recover-transaction-on-later-approval` | ⬜ |
-| A17 | Rechazo tardío sobre un cobro aprobado | Simular la llegada de un webhook `REJECTED` después de uno `APPROVED` | La transacción sigue en `done` y conserva el `payment_id` del pago aprobado. Queda advertencia en el log | ⬜ |
+| A12 | Descuadre productos vs total | Pedido con IVA | Los `products[]` iban **sin IVA** y `amount` **con** IVA | ✅ 2026-10-05: resuelto en origen. El detalle pasó a viajar con impuestos incluidos, así que ya no hay descuadre que validar. §3.20 |
+| A18 | Datos del cobro registrados | Tras un cobro aprobado, abrir la transacción en Odoo | Figuran marca, tipo, últimos cuatro, emisor, cupón, autorización y lote; con cuotas, también el plan y el total pagado por el cliente | ✅ 2026-10-06: verificado en A4 contra el **comprobante que emite Nave**, que coincide campo por campo. §3.26 |
+| A16 | 🔴 Rechazo seguido de aprobación | Pagar con tarjeta de rechazo, y en la misma pantalla usar "Volver a intentar" con una aprobada | La transacción termina en **`done`**, el pedido se confirma, y el chatter muestra el rechazo y la recuperación en orden. **Observado roto el 2026-10-05 (S00005)**: Odoo descartaba la aprobación y dejaba la transacción en `cancel` con un cobro real sin registrar. Corregido por el cambio `recover-transaction-on-later-approval` | ✅ 2026-10-06, A16-S00042: el segundo intento entra y la transacción termina en `done` con el mensaje *"Tras un intento rechazado previamente — Pago aprobado…"*. §3.26 |
+| A17 | Rechazo tardío sobre un cobro aprobado | Simular la llegada de un webhook `REJECTED` después de uno `APPROVED` | La transacción sigue en `done` y conserva el `payment_id` del pago aprobado. Queda advertencia en el log |✅ 2026-10-06, A16-S00042: se reenvió el webhook del intento rechazado sobre la transacción ya aprobada y **no la pisó**: siguió en `done` con el pago aprobado. §3.26 |
 | A14 | Devolución total desde backend 🔴 | Factura pagada → botón Reembolsar | `DELETE /api/payments/{id}` → `CANCELLING`, tx hija creada. Odoo **no debe ofrecer monto parcial** (`full_only`, N10). 🚫 Hoy el botón no existe (B6) | ⬜ |
 | A15 | Cierre del ciclo de devolución 🔴 | Tras A14, esperar el webhook `REFUNDED` | La transacción y la factura reflejan la devolución. 🚫 Hoy el webhook **no cambia nada** (B6.4) | ⬜ |
 | A13 | Cantidad fraccionaria | Línea con qty 0,15 kg × $800 | `int(qty) or 1` → se envía 1 (`:161`). Verificar impacto | ✅ 2026-10-05: corregido y verificado contra sandbox. Nave recibe `quantity: 1 × $120,00` con la cantidad real en la descripción, y el detalle suma lo cobrado. §3.20 |
