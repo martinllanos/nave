@@ -1,5 +1,47 @@
 # Borradores de correo a Nave
 
+## Borrador 5 — datos para publicar en Odoo Apps (2026-10-06)
+
+> Correo **nuevo**, con el documento `docs/requerimientos_publicacion_odoo_apps.md` adjunto.
+> Va **separado del borrador 4** a propósito: aquel pide habilitaciones técnicas urgentes a
+> `integraciones@` para poder terminar la homologación, y esto es material de marca y decisiones de
+> producto, que probablemente lee otra persona. Mezclarlos diluiría los dos.
+
+---
+
+**Asunto:** Material necesario para publicar los módulos de Odoo — Be onlyone
+
+Hola, buen día.
+
+Les escribo desde **Be onlyone**. Como quedamos, los tres módulos de integración con Odoo se van a
+publicar en **apps.odoo.com desde la cuenta de ustedes**, figurando Nave como autor y con
+distribución gratuita.
+
+Para eso necesitamos material y datos que sólo pueden aportar ustedes: el logo y el icono oficiales,
+los textos de la ficha, el canal de soporte que quieran publicar y algunos datos de identidad que
+aparecen públicamente.
+
+Les adjunto un documento que lo detalla todo, agrupado por tema. Cada pedido indica para qué se usa y
+si bloquea la publicación, así pueden responder por partes sin esperar a tenerlo completo.
+
+Dos aclaraciones que están en el documento y conviene adelantar:
+
+- Si les resulta más cómodo, podemos redactar nosotros los textos y preparar las capturas, y
+  enviárselos para que los aprueben.
+- Hay un punto a confirmar sobre la licencia. Hoy los módulos son **LGPL-3**, que es lo habitual para
+  una app gratuita y permite que cualquiera los redistribuya o modifique. Si prefieren restringir
+  eso, conviene que lo hablemos, porque afecta el esquema completo.
+
+Quedamos a disposición para cualquier duda.
+
+Saludos cordiales,
+
+**Martín Llanos**
+Be onlyone
+martinllanos@onlyone.com.ar
+
+---
+
 ## Borrador 4 — los dos bloqueos que quedan (2026-10-05)
 
 > Correo **nuevo** a `integraciones@navenegocios.com`, con copia a Jonathan Castillo.
