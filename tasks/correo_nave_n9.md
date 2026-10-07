@@ -73,16 +73,21 @@ martinllanos@onlyone.com.ar
 
 Hola, buen día.
 
-Les escribo desde **Be onlyone**. Como quedamos, los dos módulos de integración con Odoo —el de
-cobros online y el de punto de venta— se van a publicar en **apps.odoo.com desde la cuenta de
-ustedes**, figurando Nave como autor y con distribución gratuita.
+Les escribo desde **Be onlyone**. Queremos avanzar con la publicación en **apps.odoo.com** de los
+dos módulos de integración con Odoo: el de cobros online y el de punto de venta.
 
-Para eso necesitamos material y datos que sólo pueden aportar ustedes: el logo y el icono oficiales,
-los textos de la ficha, el canal de soporte que quieran publicar y algunos datos de identidad que
-aparecen públicamente.
+Les proponemos este esquema, que todavía no conversamos y necesitamos que nos confirmen: publicar
+**desde la cuenta de ustedes**, con **Nave como autor**, **distribución gratuita** y soporte en
+niveles: ustedes el primero y el segundo, nosotros el tercero.
+
+Si están de acuerdo, necesitamos material y datos que sólo pueden aportar ustedes: el logo y el icono
+oficiales, los textos de la ficha, el canal de soporte que quieran publicar y algunos datos de
+identidad que aparecen públicamente.
 
 Les adjunto un documento que lo detalla todo, agrupado por tema. Cada pedido indica para qué se usa y
-si bloquea la publicación, así pueden responder por partes sin esperar a tenerlo completo.
+si bloquea la publicación, así pueden responder por partes sin esperar a tenerlo completo. Al final
+incluye una propuesta para que Odoo figure también en **Integraciones › Plataformas** de su portal,
+con una guía de alta para los comercios que integran desde Odoo.
 
 Dos aclaraciones que están en el documento y conviene adelantar:
 

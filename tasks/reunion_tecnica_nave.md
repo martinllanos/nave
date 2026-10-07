@@ -188,6 +188,30 @@ simultáneas por terminal? El POS consulta el estado de un cobro cada 3 segundos
 
 ---
 
+## 8b. Alta de comercios y archivo de `pos_id`
+
+Conviene verlo con la pantalla abierta. El detalle está en
+`docs/requerimientos_publicacion_odoo_apps.md` §6.
+
+**El circuito que seguimos:** tienda en *Tienda online propia* → código de vinculación → correo a
+`integraciones@` con CUIT, código y medios a habilitar → `pos_id` → archivo `POS_ID-<CUIT>.xlsx` en
+*Sistema de gestión*.
+
+**Preguntas:**
+
+1. ¿Es ese el circuito correcto para un comercio que integra desde Odoo?
+2. En el archivo, una tienda de e-commerce se identifica sólo por su nombre. ¿Pueden agregar el código
+   de vinculación o la URL? Nosotros tenemos dos tiendas con la misma URL.
+3. ¿Una tienda se puede dar de baja o archivar?
+4. Los QR se llaman *"QR 1"*, *"QR 2"*, y el nombre se repite entre locales. ¿Cómo sabe el comercio
+   cuál es cada QR físico?
+5. ¿Qué términos usa la mesa de ayuda para credenciales, `pos_id`, tienda y medio de cobro? Los
+   necesitamos para los modelos de correo de la guía de alta.
+
+- Respuesta:
+
+---
+
 ## 9. Observaciones menores para ellos
 
 - **Cupón de rechazo con datos inconsistentes.** El cupón de la prueba C3 dice *"VISA CREDIT 3370"*
