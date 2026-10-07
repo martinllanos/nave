@@ -6,6 +6,9 @@ import { AlertDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
 import { register_payment_method } from "@point_of_sale/app/store/pos_store";
 import { ask } from "@point_of_sale/app/store/make_awaitable_dialog";
 
+// Resultado de una llamada que no respondió a tiempo. Ver _call.
+const TIMED_OUT = Symbol("nave_timed_out");
+
 // Los estados de Nave se clasifican en el backend (`nave_outcome`): de esa clasificación depende dar
 // una venta por cobrada, y en el navegador no hay cómo probarla. Ver NAVE_OUTCOME_BY_STATUS en
 // pos_nave/models/pos_payment_method.py.
@@ -30,8 +33,15 @@ export class PaymentNave extends PaymentInterface {
         // procesamiento.
         this.pollGraceRatio = 0.1;
         this.pollGraceMinMs = 10000;
-        // Cuántos fallos de transporte seguidos toleramos antes de cortar.
-        this.maxTransportErrors = 3;
+        // Con cuántas consultas seguidas sin respuesta se avisa que no hay conexión. No corta el
+        // cobro: la terminal sigue cobrando aunque Odoo no pueda consultarla (ver _poll).
+        this.offlineNoticeAfter = 3;
+        // Tope de cada llamada desde el navegador. Sin él, con el cable de red desenchufado la
+        // llamada no falla sino que queda esperando, y el polling no avanza ni respeta el plazo.
+        // La consulta de estado: el backend corta su llamada a Nave a los 5 s. La creación de la
+        // intención: el backend espera hasta 30 s a que Nave alcance la terminal.
+        this.statusTimeoutMs = 10000;
+        this.intentTimeoutMs = 45000;
         // El cobro en curso. Ver _await_outcome.
         this.charge = null;
     }
@@ -62,12 +72,34 @@ export class PaymentNave extends PaymentInterface {
                 return await this._handle_refund(line, payment_method_id, amount);
             }
 
+            // Si la línea ya tuvo una intención, primero se pregunta por ella: pudo haberse
+            // aprobado sin que Odoo se enterara, por ejemplo durante un corte de red (C8).
+            if (line.transaction_id) {
+                const previous = await this._reconcile_previous(
+                    line, payment_method_id, line.transaction_id
+                );
+                if (previous !== null) {
+                    return previous;
+                }
+            }
+
             // Flujo normal de cobro
-            const data = await this.pos.data.silentCall(
-                "pos.payment.method",
+            const data = await this._call(
                 "nave_send_payment_intent",
-                [[payment_method_id], amount, uuid]
+                [[payment_method_id], amount, uuid],
+                this.intentTimeoutMs
             );
+
+            // Sin respuesta a tiempo no sabemos si la intención llegó a crearse, y sin su
+            // identificador no hay forma de consultarla después.
+            if (data === TIMED_OUT) {
+                this._showError(
+                    _t("Nave no confirmó si el cobro llegó a la terminal. Revisá la terminal antes de reintentar: si muestra el cobro, cancelalo ahí."),
+                    _t("Cobro sin confirmar")
+                );
+                line.set_payment_status("retry");
+                return false;
+            }
 
             // silentCall devuelve false ante cualquier excepción del servidor (permisos, token
             // Auth0 vencido, error de red). Hay que distinguirlo de una respuesta válida de Nave.
@@ -87,8 +119,8 @@ export class PaymentNave extends PaymentInterface {
             }
 
             if (data.id) {
-                // OJO: esto es el id de la INTENCIÓN (payment_request_id), no el payment_id que
-                // pide DELETE /api/payments/{payment_id} para devolver. Pendiente de resolver.
+                // El id de la INTENCIÓN. Si el cobro se aprueba, _apply_payment_details lo reemplaza
+                // por el del pago; si no, queda para que un reintento pregunte por esta intención.
                 line.transaction_id = data.id;
                 line.set_payment_status("waitingCard");
                 return await this._await_outcome(
@@ -161,6 +193,8 @@ export class PaymentNave extends PaymentInterface {
                 settled: false,
                 // Mientras el cajero responde si vio la aprobación (ver force_done).
                 awaitingCashier: false,
+                // Cierra el aviso de falta de conexión, si está abierto.
+                closeOfflineNotice: null,
                 resolve,
             };
             this._poll(this.charge);
@@ -187,8 +221,8 @@ export class PaymentNave extends PaymentInterface {
         if (Date.now() > charge.deadline) {
             if (this._settle(charge, false)) {
                 this._showError(
-                    _t("Se agotó el tiempo de espera del cobro. Verificá el estado en la terminal antes de reintentar."),
-                    _t("Tiempo agotado")
+                    _t("No se pudo confirmar el cobro con Nave. Tocá Volver a intentar: Odoo va a consultar primero el cobro anterior y no lo va a cobrar dos veces."),
+                    _t("Cobro sin confirmar")
                 );
             }
             return;
@@ -217,42 +251,109 @@ export class PaymentNave extends PaymentInterface {
             return;
         }
 
-        // silentCall devuelve false ante cualquier excepción del servidor. Toleramos algunos
-        // fallos seguidos (un corte breve de red) antes de darnos por vencidos.
-        if (!data) {
+        // Sin respuesta —la red falla, la llamada no responde a tiempo o Nave contesta con un
+        // error— el cobro NO termina: la intención existe en la terminal y el cliente puede estar
+        // pagando. Darlo por fallido dejaba la línea lista para cobrar de nuevo, y en C8 Nave
+        // aprobó el pago 28 s después. Sólo lo terminan Nave, el plazo o el cajero.
+        if (!data || data.error) {
             charge.transportErrors += 1;
-            if (charge.transportErrors >= this.maxTransportErrors) {
-                if (this._settle(charge, false)) {
-                    this._showError(
-                        _t("Se perdió la conexión con el servidor mientras se consultaba el cobro. Verificá el estado en la terminal antes de reintentar."),
-                        _t("Desconexión")
-                    );
-                }
-                return;
+            if (charge.transportErrors >= this.offlineNoticeAfter) {
+                this._show_offline_notice(charge);
             }
             this._schedule_next_poll(charge);
             return;
         }
 
-        if (data.error) {
-            if (this._settle(charge, false)) {
-                this._showError(data.message, _t("Error consultando estado en Nave"));
-            }
-            return;
-        }
-
         charge.transportErrors = 0;
+        this._close_offline_notice(charge);
         if (!this._finish(charge, data)) {
             this._schedule_next_poll(charge);
         }
     }
 
-    _query_status(payment_method_id, intent_id) {
-        return this.pos.data.silentCall(
-            "pos.payment.method",
+    async _query_status(payment_method_id, intent_id) {
+        const data = await this._call(
             "nave_check_payment_status",
-            [[payment_method_id], intent_id]
+            [[payment_method_id], intent_id],
+            this.statusTimeoutMs
         );
+        return data === TIMED_OUT ? false : data;
+    }
+
+    /**
+     * Llama al backend con un tope de tiempo. Devuelve TIMED_OUT si no respondió a tiempo; la
+     * respuesta que llegue después se descarta.
+     */
+    _call(method, args, timeoutMs) {
+        let timer;
+        const timeout = new Promise((resolve) => {
+            timer = setTimeout(() => resolve(TIMED_OUT), timeoutMs);
+        });
+        return Promise.race([
+            this.pos.data.silentCall("pos.payment.method", method, args),
+            timeout,
+        ]).finally(() => clearTimeout(timer));
+    }
+
+    /**
+     * Avisa, una sola vez por corte, que no hay conexión y que el cobro puede seguir activo.
+     *
+     * Es una notificación y no un diálogo porque no hay nada que decidir: el cajero tiene que
+     * esperar, y Cancelar y Forzar terminación siguen en la línea.
+     */
+    _show_offline_notice(charge) {
+        if (charge.closeOfflineNotice) {
+            return;
+        }
+        charge.closeOfflineNotice = this.env.services.notification.add(
+            _t("El cobro puede seguir activo en la terminal: no lo cobres de nuevo ni por otro medio. Odoo lo va a confirmar cuando vuelva la conexión."),
+            { title: _t("Sin conexión con Nave"), type: "warning", sticky: true }
+        );
+    }
+
+    _close_offline_notice(charge) {
+        if (charge.closeOfflineNotice) {
+            charge.closeOfflineNotice();
+            charge.closeOfflineNotice = null;
+        }
+    }
+
+    /**
+     * Antes de cobrar de nuevo, pregunta por la intención anterior de la línea.
+     *
+     * Devuelve null si corresponde crear un cobro nuevo, o el desenlace del reintento (true o
+     * false, o la espera de esa misma intención). Se pregunta siempre, y no sólo cuando el
+     * desenlace anterior fue desconocido: así no hace falta recordar nada que sobreviva a una
+     * recarga del POS, y el costo es una consulta por reintento.
+     */
+    async _reconcile_previous(line, payment_method_id, intent_id) {
+        const data = await this._query_status(payment_method_id, intent_id);
+        if (!data || data.error) {
+            this._showError(
+                _t("No se pudo consultar a Nave por el cobro anterior de esta línea, y ese cobro pudo haberse aprobado. No lo cobres de nuevo: esperá a que vuelva la conexión y reintentá."),
+                _t("No se puede confirmar el cobro anterior")
+            );
+            line.set_payment_status("retry");
+            return false;
+        }
+        switch (data.nave_outcome) {
+            case "approved":
+                this._apply_payment_details(line, data, intent_id);
+                this.env.services.notification.add(
+                    _t("El cobro anterior de esta línea ya estaba aprobado en Nave. No se cobró de nuevo."),
+                    { title: _t("Cobro confirmado"), type: "success" }
+                );
+                return true;
+            case "rejected":
+            case "disabled":
+            case "expired":
+                return null;
+            default:
+                // En curso o desconocido: se retoma la espera de esa misma intención. No sabemos
+                // cuándo se creó, así que se usa el plazo de respaldo; Nave la termina antes.
+                line.set_payment_status("waitingCard");
+                return this._await_outcome(line, payment_method_id, intent_id, null);
+        }
     }
 
     /**
@@ -329,6 +430,7 @@ export class PaymentNave extends PaymentInterface {
         }
         charge.settled = true;
         clearTimeout(charge.timer);
+        this._close_offline_notice(charge);
         if (this.charge === charge) {
             this.charge = null;
         }
@@ -347,6 +449,7 @@ export class PaymentNave extends PaymentInterface {
         if (this.charge) {
             this.charge.settled = true;
             clearTimeout(this.charge.timer);
+            this._close_offline_notice(this.charge);
             this.charge = null;
         }
     }

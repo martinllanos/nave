@@ -51,6 +51,11 @@ Nave informe un desenlace o venza el plazo con su margen, como ya exige la spec.
 *Por qué*: la terminal sigue cobrando mientras el punto de venta no puede consultarla. Darlo por
 fallido es afirmar algo que no se sabe, y fue lo que dejó la línea lista para cobrar de nuevo.
 
+*Las respuestas de error cuentan igual*: si la consulta vuelve con un error de Nave en lugar de un
+estado, el cobro tampoco termina. La intención existe en la terminal y su desenlace sigue sin
+saberse; un error transitorio de Nave en medio de un cobro es el mismo caso que un corte de red. Si
+el error es permanente, por ejemplo credenciales vencidas, el cobro termina al vencer el plazo.
+
 *Qué ve el cajero*: con tres fallos seguidos, una notificación persistente y no bloqueante: *"Sin
 conexión con Nave. El cobro puede seguir activo en la terminal: no lo cobres de nuevo ni por otro
 medio. Odoo lo va a confirmar cuando vuelva la conexión."* Se cierra sola con la primera respuesta.
