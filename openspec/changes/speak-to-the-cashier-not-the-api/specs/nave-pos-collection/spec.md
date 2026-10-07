@@ -7,34 +7,60 @@
 Cuando un cobro no se completa, el aviso que recibe el cajero DEBE describir la situación en sus
 términos e indicarle qué hacer a continuación.
 
-El aviso NO DEBE mostrar identificadores internos del proveedor ni de la integración, y NO DEBE
-afirmar una causa que el punto de venta no pueda distinguir.
+El motivo DEBE tomarse del pago cuando lo hay, y no de la intención de cobro. El aviso DEBE usar el
+mensaje que el proveedor publica para ese motivo y NO DEBE presentar un código como si fuera la
+explicación. NO DEBE afirmar una causa que el proveedor no haya informado.
 
 #### Scenario: La tarjeta no tiene fondos
 
 - **WHEN** el cobro se rechaza porque la tarjeta no tiene saldo suficiente
-- **THEN** el cajero recibe un aviso de que el pago fue rechazado y de que puede probar con otra
-  tarjeta
+- **THEN** el cajero recibe un aviso de que la tarjeta no tiene fondos suficientes y de que puede
+  reintentar o cobrar con otro medio
 - **AND** no se le indica contactar al proveedor ni se presenta como un problema de seguridad
 
-#### Scenario: El proveedor informa el motivo en lenguaje llano
+#### Scenario: La intención informa un desenlace distinto al del pago
 
-- **WHEN** el proveedor informa un motivo legible del rechazo
-- **THEN** ese motivo acompaña al aviso
+- **WHEN** el pago informa un motivo de rechazo y la intención informa otro, como los intentos
+  excedidos
+- **THEN** el aviso explica el motivo del pago
 
-#### Scenario: El proveedor sólo informa un código
+#### Scenario: El proveedor informa un motivo que no está en su catálogo
 
-- **WHEN** el único motivo disponible es un identificador técnico
-- **THEN** el cajero recibe la descripción de la situación, sin el identificador
+- **WHEN** el motivo informado no tiene un mensaje publicado por el proveedor
+- **THEN** el cajero recibe la descripción de la situación y qué hacer, sin motivo
 
-#### Scenario: La intención se dio de baja
+#### Scenario: La intención se dio de baja con un motivo conocido
 
-- **WHEN** la intención se da de baja, sea por una cancelación en la terminal, por vencimiento o
-  porque el proveedor no pudo avisarle al equipo
+- **WHEN** la intención se da de baja y el proveedor informa por qué, como una cancelación en la
+  terminal
+- **THEN** el aviso dice ese motivo y que puede generarse un cobro nuevo
+
+#### Scenario: La intención se dio de baja sin motivo
+
+- **WHEN** la intención se da de baja y el proveedor no informa por qué
 - **THEN** el aviso dice que el cobro ya no está disponible y que puede generarse uno nuevo
-- **AND** no afirma cuál de esas causas fue
+- **AND** no afirma una causa
 
 #### Scenario: El cobro queda reintentable
 
 - **WHEN** el cobro termina en cualquiera de estas situaciones
 - **THEN** la línea de pago queda en condiciones de reintentarse, sin dar la venta por cobrada
+
+### Requirement: Lo que pide la soporte queda a mano
+
+Cuando un cobro no se completa, el aviso DEBE incluir, separados de la explicación y rotulados como
+datos para soporte, el código que informó el proveedor y los identificadores del cobro.
+
+El desenlace de cada cobro DEBE quedar registrado en el servidor, con su estado, su motivo y sus
+identificadores, aunque el cajero cierre el aviso.
+
+#### Scenario: El cajero llama a soporte después de un rechazo
+
+- **WHEN** un cobro se rechaza y el cajero necesita consultarlo con la soporte del proveedor
+- **THEN** el aviso le muestra, bajo un rótulo de soporte, el código tal como lo informó el
+  proveedor y los identificadores del pago y de la intención
+
+#### Scenario: El aviso ya se cerró
+
+- **WHEN** el cajero cerró el aviso y hay que averiguar qué pasó con un cobro
+- **THEN** el registro del servidor tiene el estado, el motivo y los identificadores de ese cobro

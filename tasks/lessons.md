@@ -14,6 +14,10 @@
 
 - **Los datos que uno commitea para verificar se quedan y rompen los tests después.** (2026-10-05) Una transacción creada con `env.cr.commit()` en la base local para comprobar un `payload` contra sandbox entró, cuarenta minutos más tarde, en el dominio del cron de conciliación y tiró abajo un test que afirma que el cron no toca transacciones recientes. El test asume que no hay ninguna otra transacción Nave pendiente en la base, cosa que en una base de desarrollo no se sostiene. Limpiar lo que se commitea al verificar, y desconfiar de un test que falla justo después de haber tocado datos a mano.
 
+- **Antes de diseñar alrededor de que el proveedor no documenta algo, buscar la documentación.** (2026-10-07) Diseñé un filtro "por forma" para los motivos de rechazo de Nave porque supuse que no publicaba su catálogo. Lo publica, completo y en castellano, en el portal para desarrolladores. El filtro dejó pasar una frase en inglés técnico, y encima de otro objeto: el motivo de la intención, no el del pago. Un supuesto sobre lo que el proveedor *no* ofrece es una afirmación como cualquier otra, y hay que verificarla o preguntarle al usuario antes de construir encima. El portal de Nave arma las páginas con JavaScript: las tablas se sacan de sus `chunk-*.js` (ver `docs/nave_codigos_referencia.md`).
+
+- **Cuando una API tiene dos objetos con estado, preguntarse de cuál es cada dato.** (2026-10-07) Nave tiene intención y pago, cada uno con su estado y su motivo. El módulo ya traía el pago en cada consulta y leía el motivo de la intención. Mirar el nombre del campo (`reason_name`) no alcanza: hay que ver de qué objeto cuelga.
+
 ## ✅ Patrones a Seguir (Best Practices)
 *(Ejemplos: Usar subagentes para la lectura de logs pesados)*
 

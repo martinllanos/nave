@@ -27,16 +27,22 @@ salvo en nuestro código.
 
 ## What Changes
 
-- **Un rechazo se lee como un rechazo.** Deja de presentarse como un bloqueo de seguridad, y el
-  cajero recibe la indicación de probar con otra tarjeta.
-- **Los motivos que Nave informa en lenguaje llano se muestran; los códigos internos no.** Cuando lo
-  único disponible es un identificador técnico, el cajero recibe una explicación de la situación en
-  vez del código.
-- **El aviso de baja no afirma una causa que no conocemos.** Una intención dada de baja puede venir
-  de una cancelación, de un vencimiento o de que Nave no pudiera avisarle a la terminal, y desde
-  Odoo son indistinguibles.
+- **Un rechazo se lee como un rechazo.** Deja de presentarse como un bloqueo de seguridad.
+- **El motivo sale del pago, no de la intención.** Nave informa el motivo del rechazo en el pago
+  (`status.reason_code`); la intención informa su propio desenlace. Leer el de la intención le
+  mostró al cajero *"payment retries limit reached"* por una tarjeta sin fondos.
+- **El cajero lee el motivo en las palabras de Nave.** Nave publica el catálogo de motivos de
+  rechazo y de baja, con un mensaje en castellano para cada código. El aviso usa ese mensaje y le
+  suma qué hacer a continuación. Si el código no está en el catálogo, el aviso describe la
+  situación sin motivo.
+- **El código queda a mano para soporte.** Debajo del aviso, en un bloque rotulado *"Para
+  soporte"*, van el código tal como lo informa Nave y los identificadores del cobro. Es lo que el
+  cajero necesita si llama a la soporte de primer nivel.
+- **El desenlace queda registrado.** El aviso desaparece cuando el cajero lo cierra, y un cobro
+  rechazado no deja nada en Odoo. El servidor registra en el log el desenlace de cada cobro.
 
-No cambia qué cobros se aceptan ni cómo se registran: sólo qué se le dice al cajero.
+No cambia qué cobros se aceptan ni cómo se registran: sólo qué se le dice al cajero y qué queda
+registrado.
 
 ## Capabilities
 
@@ -47,17 +53,28 @@ No cambia qué cobros se aceptan ni cómo se registran: sólo qué se le dice al
 ### Modified Capabilities
 
 - `nave-pos-collection`: hoy exige que el cajero reciba un aviso que distinga un vencimiento de una
-  falta de respuesta del proveedor. Se amplía a todos los desenlaces de un cobro, con la condición de
-  que el aviso describa la situación en lugar de reproducir el vocabulario de la API.
+  falta de respuesta del proveedor. Se amplía a todos los desenlaces de un cobro: el aviso describe
+  la situación con el motivo que publica Nave, y los códigos van aparte, rotulados para soporte.
 
 ## Impact
 
-- `pos_nave/static/src/app/payment_nave.js` — la clasificación de estados y los mensajes.
-- `pos_nave/models/pos_payment_method.py` — el motivo sintético que se inyecta al traducir el error.
-- Pruebas: `pos_nave/tests/`.
-- Sin impacto en `payment_nave` ni en los flujos online.
+- `payment_nave/models/nave_reasons.py` (nuevo) — el catálogo de motivos de Nave. Vive en
+  `payment_nave` porque los cobros online reciben los mismos códigos, aunque este cambio no toca
+  esos flujos.
+- `pos_nave/models/pos_payment_method.py` — resolver el motivo desde el pago y registrar el
+  desenlace; dejar de inyectar un motivo sintético al traducir el error de baja.
+- `pos_nave/static/src/app/payment_nave.js` — la clasificación de estados y los avisos.
+- Pruebas: `payment_nave/tests/` y `pos_nave/tests/`.
 
 ### Evidencia
+
+El catálogo de Nave está transcripto en `docs/nave_codigos_referencia.md`, con la fecha y las URL
+de origen.
+
+La primera implementación de este cambio mostraba el motivo cuando "parecía una frase". La reprueba
+de C3 con la versión desplegada mostró *"El pago fue rechazado: payment retries limit reached"*:
+una frase en inglés técnico que, además, describe a la intención y no a la tarjeta. Las capturas
+están en `docs/homologacion/evidencias/C3/reprueba_18.0.1.8.0/`.
 
 Los tres casos están cerrados en la matriz con sus capturas en `docs/homologacion/evidencias/`, y
 documentados en `tasks/plan_homologacion_nave.md` §3.28, §3.29 y §3.30. El rechazo se verificó dos

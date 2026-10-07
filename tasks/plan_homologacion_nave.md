@@ -458,6 +458,48 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.31 Reprueba de C3: el motivo se leía del objeto equivocado (2026-10-07)
+
+Reprueba de C3 con `pos_nave 18.0.1.8.0` desplegado: cobro de $123,45 a la terminal con una tarjeta
+sin fondos. Evidencia en `docs/homologacion/evidencias/C3/reprueba_18.0.1.8.0/`.
+
+**Lo que se corrigió se ve:** el título es *"Pago rechazado"*, el aviso indica reintentar y la línea
+queda con *"Volver a intentar"*. Ya no hay alarma de seguridad ni instrucción de llamar a Nave. Esta
+vez la terminal sí imprimió el cupón *RECHAZADO* (código de operación `RGR230718234`), cosa que en
+§3.30 no había hecho: la impresión es opcional en la terminal.
+
+**Lo que salió mal:** el aviso decía *"El pago fue rechazado: payment retries limit reached. Probá
+con otra tarjeta."*. La terminal, en el mismo momento, decía que la tarjeta no tenía fondos.
+
+**Por qué:** Nave informa dos motivos y el módulo leía el que no correspondía. Según la
+documentación para desarrolladores (transcripta en `docs/nave_codigos_referencia.md`):
+
+- La **intención** quedó en `BLOCKED`, que Nave define como *"bloqueada por fraude o intentos
+  excedidos"*, con *"payment retries limit reached"*: los intentos excedidos. Describe a la
+  intención.
+- El **pago** informa por qué se rechazó la tarjeta en `status.reason_code`. Nave publica el
+  catálogo de esos códigos, con un mensaje en castellano para cada uno.
+
+El backend ya traía el pago en cada consulta, para imprimir los datos de la tarjeta, así que el
+motivo correcto llegaba al navegador; el JS leía el otro. La heurística de mostrar el motivo "si
+parece una frase" partía de que Nave no publicaba su catálogo, y el supuesto era falso.
+
+**Corrección** (`speak-to-the-cashier-not-the-api`, `payment_nave 18.0.1.12.0` y
+`pos_nave 18.0.1.9.0`):
+
+- El catálogo de Nave queda en `payment_nave/models/nave_reasons.py`.
+- El motivo se toma del pago, y la explicación sale siempre del catálogo.
+- Debajo del aviso aparece un bloque *"Para soporte"* con el código y los identificadores.
+- El servidor registra el desenlace de cada cobro.
+
+Pendiente de reprueba con la terminal.
+
+**De paso, en el log del servidor:** cada cobro del POS dispara un webhook de pago hacia
+`/payment/nave/webhook`. `payment_nave` no lo encuentra entre sus `payment.transaction` y responde
+500. Nave reintenta cinco veces en unas 7,8 h (10 s, 70 s, 490 s, 3340 s, 24010 s) y después lo
+descarta. No afecta al cobro, pero deja errores en el log por cada venta con tarjeta. Es la variante
+POS del caso D4c.
+
 ### 3.30 🔴 C3: un rechazo por fondos le dice al cajero que llame a Nave (2026-10-07)
 
 Cobro de $123,45 a la terminal, pagado con una tarjeta sin fondos. Evidencia en
@@ -1668,7 +1710,7 @@ deciden cómo se escribe el fix de B11.
 | C0 | Ruteo a la terminal correcta 🔴 | Lanzar un cobro con el `pos_id` actual | El cobro **aparece en la terminal `L40000978`**. Si no aparece, el `pos_id` es el de e-commerce (§3.5) y hay que pedirle a Nave el de la terminal |✅ 2026-10-06: el cobro apareció en la terminal **L40037644**, la del `pos_id` configurado. §3.27 |
 | C1 | Contrato de estados 🔴 | Cobrar y capturar la respuesta cruda de `GET /api/payment_requests/{id}` | Documentar la forma exacta de `status` y el catálogo completo de valores. **Todo el polling depende de una suposición del código** (`payment_nave.js:124`: *"suponiendo estructura {status:{name:...}}"*) | ✅ 2026-10-05: forma capturada en §3.20. La suposición es correcta en la intención, pero **no** dentro de `payment_attempts` |
 | C2 | Cobro aprobado con chip | Orden POS → Tarjeta → insertar chip → aprobar | Línea `done`, orden validada, `transaction_id` guardado |✅ 2026-10-06, POS 1/0001: línea cobrada, orden facturada (`FA-C 00001-00000004`) y `transaction_id` guardado. Se pagó por **NFC**, no por chip. §3.27 |
-| C3 | Cobro rechazado | Tarjeta de rechazo en la terminal | Diálogo con el `reason_code`, línea en `retry`, el cajero puede reintentar |🔴 2026-10-07: la línea queda reintentable y no se contabiliza nada, pero Nave devuelve `BLOCKED` y el cajero lee *"Nave bloqueó la operación por motivos de seguridad. Contactá a Nave antes de reintentar"* por una tarjeta sin fondos. §3.30 |
+| C3 | Cobro rechazado | Tarjeta de rechazo en la terminal | Diálogo con el `reason_code`, línea en `retry`, el cajero puede reintentar |🔴 2026-10-07: la línea queda reintentable y no se contabiliza nada, pero Nave devuelve `BLOCKED` y el cajero lee *"Nave bloqueó la operación por motivos de seguridad. Contactá a Nave antes de reintentar"* por una tarjeta sin fondos. §3.30. ⚠️ Reprueba con 18.0.1.8.0: ya no hay alarma de seguridad, pero el aviso muestra el motivo de la intención (*"payment retries limit reached"*) en vez del de la tarjeta. Corregido en 18.0.1.9.0, pendiente de reprueba. §3.31 |
 | C4 | Cancelación desde Odoo | Iniciar cobro → botón Cancel | `DELETE` a Nave y la **terminal vuelve a reposo**. Ojo: `send_payment_cancel` retorna `true` siempre, incluso si el DELETE falló (`payment_nave.js:185-190`) | ⬜ |
 | C5 | Cancelación desde la terminal | Iniciar cobro → cancelar en el equipo | Nave notifica `DISABLED` con `manual_disabled_by_user`. **Se espera loop infinito** (B4) |⚠️ 2026-10-07: la terminal vuelve a reposo ("Ingresá el monto a cobrar") y el POS cierra la línea como reintentable. Pero el motivo que se le muestra al cajero es el mismo código que en C6, así que **no se distingue una cancelación de un vencimiento**. §3.29 |
 | C6 | Expiración de la intención | Iniciar cobro y no tocar nada 300 s | Nave marca `EXPIRED`. **Se espera loop infinito** (B4) |⚠️ 2026-10-07: **no hay loop infinito**. Nave no manda `EXPIRED` sino `DISABLED` con `payment_request_is_disabled`: la terminal da de baja la intención. La línea queda reintentable y no se contabiliza nada, pero el cajero lee el código crudo. §3.28 |
