@@ -51,7 +51,7 @@ class PaymentTransaction(models.Model):
         # El medio de cobro define el endpoint y también el pos_id: una factura pagada desde el
         # portal va por el circuito de link de pago, no por el de la tienda. Sale de una sola
         # variable para que los dos no puedan quedar desalineados, que es lo que hace que Nave
-        # responda 409 INVALID_POS.
+        # responda `invalid_pos`.
         payment_type = 'payment_link' if self.invoice_ids else 'ecommerce'
         api_url = f"{base_url}/api/payment_request/{payment_type}"
 

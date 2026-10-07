@@ -18,7 +18,7 @@ NAVE_SANDBOX_API_URL = 'https://api-sandbox.ranty.io'
 NAVE_PRODUCTION_API_URL = 'https://api.ranty.io'
 
 # Campo del que sale el `pos_id` de cada medio de cobro online. Nave asigna uno distinto por medio
-# y rechaza con 409 INVALID_POS la intención que llega con el de otro. Un medio ausente de este
+# y rechaza con `invalid_pos` la intención que llega con el de otro. Un medio ausente de este
 # mapa usa `nave_pos_id`.
 NAVE_POS_ID_FIELDS = {
     'payment_link': 'nave_payment_link_pos_id',
@@ -56,14 +56,21 @@ class PaymentProvider(models.Model):
     nave_pos_id = fields.Char(
         string="POS ID (Tienda)",
         required_if_provider='nave',
-        help="ID único de la tienda/POS de e-commerce en Nave (obtenido desde Nave > Integraciones)."
+        help="Identificador del medio de cobro de la tienda online, que usa el checkout del "
+             "e-commerce.\n"
+             "Se copia del archivo POS_ID-<CUIT>.xlsx que se descarga desde Nave › Integraciones › "
+             "Sistema de gestión › Descargar archivo: es la fila con Medio de cobro ECOMMERCE cuyo "
+             "Nombre/N° de serie es el nombre de la tienda dada de alta en Integraciones › Tienda "
+             "online propia."
     )
     nave_payment_link_pos_id = fields.Char(
         string="POS ID (Link de pago)",
-        help="ID del punto de venta del medio LINK DE PAGO en Nave, para los links generados desde "
-             "facturas y pedidos. Se descarga desde Nave > Integraciones > Sistema de gestión.\n"
-             "Nave asigna un ID distinto por medio de cobro: usar el de la tienda acá hace que la "
-             "API rechace el link con 409 INVALID_POS.\n"
+        help="Identificador del medio de cobro de link de pago, que usan los links generados desde "
+             "facturas y pedidos.\n"
+             "Se copia del mismo archivo POS_ID-<CUIT>.xlsx, de Nave › Integraciones › Sistema de "
+             "gestión: es la fila con Medio de cobro LDP.\n"
+             "Nave asigna un identificador distinto a cada medio de cobro: si acá se carga el de la "
+             "tienda, Nave rechaza el link con invalid_pos.\n"
              "Si se deja vacío se usa el POS ID (Tienda), que es el comportamiento anterior.",
     )
     nave_checkout_duration_minutes = fields.Integer(
@@ -240,7 +247,7 @@ class PaymentProvider(models.Model):
         """ Devuelve el `pos_id` que corresponde a un medio de cobro de Nave.
 
         Nave asigna un identificador distinto por medio —tienda de e-commerce, link de pago— y
-        rechaza con `409 INVALID_POS` la intención que llega con el de otro. Los puntos de uso ya
+        rechaza con `invalid_pos` la intención que llega con el de otro. Los puntos de uso ya
         saben a qué medio pertenecen, porque eso determina el endpoint, así que piden el `pos_id`
         declarándolo, igual que piden el host con `_nave_get_api_url`.
 

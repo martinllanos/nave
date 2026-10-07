@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Punto de Venta Nave',
-    'version': '18.0.1.10.1',
+    'version': '18.0.1.10.2',
     'category': 'Sales/Point of Sale',
     'summary': 'Cobros presenciales de Nave (Naranja X / Galicia) en el Punto de Venta de Odoo: terminal Nave Point y QR interoperable.',
     'description': """
@@ -13,8 +13,10 @@
         - Datos del cobro en la línea de pago y en el ticket (marca, últimos dígitos, cupón, billetera).
         - Soporte multi-compañía nativo.
 
-        Cada dispositivo (terminal o QR) tiene su propio pos_id en Nave, que se descarga desde
-        Nave > Integraciones > Sistema de gestión y se carga en el método de pago del POS.
+        Cada dispositivo (terminal o QR) tiene su propio pos_id en Nave. Nave los entrega en el
+        archivo POS_ID-<CUIT>.xlsx, que se descarga desde Nave › Integraciones › Sistema de gestión
+        › Descargar archivo, con una fila por dispositivo; cada uno se carga en su método de pago
+        del POS.
     """,
     'author': 'Be onlyone',
     'website': 'https://onlyone.odoo.com',

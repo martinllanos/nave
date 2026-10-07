@@ -2,3 +2,4 @@
 
 from . import test_nave_payment
 from . import test_nave_reasons
+from . import test_nave_config_help

@@ -738,3 +738,13 @@ class TestPosNavePayment(TransactionCase):
 
         self.assertTrue(any(body in line for line in logs.output))
         self.assertTrue(any('terminado en DISABLED' in line for line in logs.output))
+
+    def test_39_the_device_help_points_at_its_row(self):
+        """La ayuda lleva al comercio a la fila de su dispositivo en el archivo de Nave.
+
+        Cada terminal y cada QR tiene su pos_id, y uno cruzado hace que Nave rechace el cobro sin
+        decir cuál está mal.
+        """
+        ayuda = self.env['pos.payment.method']._fields['nave_terminal_id'].help or ''
+        for marca in ('POS_ID-', 'Sistema de gestión', 'NAVE POINT', 'QR', 'número de serie'):
+            self.assertIn(marca, ayuda)

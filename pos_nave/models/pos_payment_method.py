@@ -77,10 +77,16 @@ class PosPaymentMethod(models.Model):
 
     nave_terminal_id = fields.Char(
         string='ID del punto de venta en Nave',
-        help='El pos_id que Nave asigna al dispositivo: la terminal Nave Point o el QR físico. '
-             'Se descarga desde Nave > Integraciones > Sistema de gestión. '
-             'Cada dispositivo tiene el suyo y está atado a un tipo de pago: usar el de otro tipo '
-             'hace que la API responda INVALID_POS.',
+        help='Identificador del dispositivo con el que cobra este método: la terminal Nave Point o '
+             'el QR físico.\n'
+             'Se copia del archivo POS_ID-<CUIT>.xlsx que se descarga desde Nave › Integraciones › '
+             'Sistema de gestión › Descargar archivo:\n'
+             '- Nave Point: la fila con Medio de cobro NAVE POINT cuyo Nombre/N° de serie es el '
+             'número de serie impreso en la terminal.\n'
+             '- QR: la fila con Medio de cobro QR del local que corresponda (Nombre del local), con '
+             'el nombre de ese QR.\n'
+             'Cada identificador sirve para un solo medio de cobro: si se carga el de otro, Nave '
+             'rechaza el cobro con invalid_pos.',
         copy=False
     )
 
