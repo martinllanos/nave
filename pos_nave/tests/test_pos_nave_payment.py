@@ -403,11 +403,10 @@ class TestPosNavePayment(TransactionCase):
 
     @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.delete')
     def test_18_cancel_reports_nave_rejection(self, mock_delete):
-        """Nave rechaza la baja de una intención de terminal y hay que decirlo.
+        """Si Nave no da de baja la intención, hay que decirlo con su mensaje.
 
-        Su catálogo sólo admite dar de baja payment_link, dynamic_qr y static_qr, así que un
-        smart_pos responde 400. Callarlo dejaría al cajero creyendo que canceló un cobro que sigue
-        vivo hasta expirar.
+        Callarlo dejaría al cajero creyendo que canceló un cobro que sigue vivo en la terminal hasta
+        que vence.
         """
         import requests as _requests
         response = MagicMock(status_code=400)
@@ -438,6 +437,11 @@ class TestPosNavePayment(TransactionCase):
         self.assertEqual(
             mock_delete.call_args[0][0],
             'https://e3-api.ranty.io/api/payment_requests/intent-1234',
+        )
+        # Texto fijo: con una descripción propia Nave rechazaba todas las bajas (C4).
+        self.assertEqual(
+            mock_delete.call_args[1]['json'],
+            {'reason': {'code': 'disabled_from_saas', 'description': 'disabled from SAAS'}},
         )
 
     # ──────────────────────────────────────────────
@@ -748,3 +752,55 @@ class TestPosNavePayment(TransactionCase):
         ayuda = self.env['pos.payment.method']._fields['nave_terminal_id'].help or ''
         for marca in ('POS_ID-', 'Sistema de gestión', 'NAVE POINT', 'QR', 'número de serie'):
             self.assertIn(marca, ayuda)
+
+    # ──────────────────────────────────────────────
+    # BAJA DE LA INTENCIÓN
+    # ──────────────────────────────────────────────
+
+    @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.delete')
+    def test_40_a_rejected_reason_is_retried_without_one(self, mock_delete):
+        """Si Nave cambia el texto del motivo, la baja sigue funcionando, sin motivo."""
+        rechazo = self._http_error(
+            400, '{"code": "validation_exception", "message": ["Invalid input reason"]}'
+        )
+        mock_delete.side_effect = [rechazo, _mock_response({'message': 'Payment request deleted'})]
+
+        res = self.pos_payment_method.nave_cancel_payment_intent(
+            self.pos_payment_method.id, intent_id='intent-1234'
+        )
+
+        self.assertTrue(res.get('success'))
+        self.assertEqual(mock_delete.call_count, 2)
+        segundo = mock_delete.call_args_list[1][1]
+        self.assertNotIn('json', segundo)
+        self.assertNotIn('Content-Type', segundo['headers'])
+
+    @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.delete')
+    def test_41_other_rejections_are_not_retried(self, mock_delete):
+        """Sólo el rechazo del motivo se reintenta: otra causa no cambia por repetir la baja."""
+        mock_delete.side_effect = self._http_error(
+            400, '{"code": "payment_request_is_disabled", "message": "Payment request is disabled"}'
+        )
+
+        res = self.pos_payment_method.nave_cancel_payment_intent(
+            self.pos_payment_method.id, intent_id='intent-1234'
+        )
+
+        self.assertTrue(res.get('error'))
+        self.assertEqual(mock_delete.call_count, 1)
+
+    @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.delete')
+    def test_42_a_failed_cancel_logs_what_nave_said(self, mock_delete):
+        """El motivo de C4 se supo por el aviso al cajero: el log sólo tenía el código HTTP."""
+        mock_delete.side_effect = self._http_error(
+            400, '{"code": "payment_request_is_disabled", "message": "Payment request is disabled"}'
+        )
+
+        with self.assertLogs(POS_LOGGER, level='ERROR') as logs:
+            self.pos_payment_method.nave_cancel_payment_intent(
+                self.pos_payment_method.id, intent_id='intent-1234'
+            )
+
+        registro = next(line for line in logs.output if 'no dio de baja' in line)
+        for dato in ('intent-1234', '400', 'Payment request is disabled'):
+            self.assertIn(dato, registro)

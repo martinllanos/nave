@@ -701,10 +701,10 @@ export class PaymentNave extends PaymentInterface {
             [[payment_method_id], line.transaction_id]
         );
 
-        // Nave rechaza la baja de las intenciones de terminal: su catálogo sólo admite dar de baja
-        // payment_link, dynamic_qr y static_qr. Callarlo sería peor que el error: el cajero daría
-        // por cancelado un cobro que sigue vivo hasta que expira, y si el cliente apoya la tarjeta
-        // en ese lapso, se cobra.
+        // Si Nave no confirma la baja, hay que decirlo: el cajero daría por cancelado un cobro que
+        // sigue vivo en la terminal hasta que vence, y si el cliente apoya la tarjeta en ese lapso,
+        // se cobra. Hasta C4, Nave rechazaba todas las bajas por el texto del motivo (ver
+        // NAVE_CANCEL_REASON en el backend).
         if (!data || data.error) {
             this._showError(
                 _t(

@@ -53,6 +53,18 @@ NAVE_OUTCOME_BY_STATUS = {
     'PROCESSING': 'pending',
 }
 
+# Motivo de baja que Odoo informa al cancelar un cobro desde el punto de venta.
+#
+# La descripción NO es texto libre, aunque la documentación de Nave la presente así: Nave exige un
+# texto fijo para cada código, comparado exacto y con mayúsculas, y rechaza cualquier otro con
+# `400 validation_exception "Invalid input reason"`. Con una descripción propia ("Cancelado desde
+# Odoo POS") Nave rechazó todas las cancelaciones, y la terminal siguió cobrando (C4). Pares
+# verificados en `docs/nave_codigos_referencia.md` §5.
+#
+# `disabled_from_saas` es la baja pedida por el sistema del comercio. No confundir con
+# `manual_disabled_by_user`, que es la baja hecha en la terminal.
+NAVE_CANCEL_REASON = {'code': 'disabled_from_saas', 'description': 'disabled from SAAS'}
+
 # Desenlaces en los que el cobro ya terminó, salga bien o mal. Al llegar a uno de ellos el POS deja
 # de consultar, así que es el momento de dejar registrado el desenlace.
 NAVE_FINAL_OUTCOMES = {'approved', 'rejected', 'disabled', 'expired'}
@@ -353,6 +365,13 @@ class PosPaymentMethod(models.Model):
             return ''
         return (response.text or '')[:500]
 
+    def _nave_reason_rejected(self, exc):
+        """ True si Nave rechazó una baja por el motivo informado, y no por otra causa. """
+        response = getattr(exc, 'response', None)
+        if response is None or response.status_code != 400:
+            return False
+        return 'invalid input reason' in self._nave_error_body(exc).lower()
+
     def _nave_error_code(self, exc):
         """ Código de error que devuelve Nave en el cuerpo, o False si no lo trae. """
         return self._nave_error_payload(exc).get('code') or False
@@ -534,26 +553,32 @@ class PosPaymentMethod(models.Model):
             'Accept': 'application/json',
         }
 
-        # 'disabled_from_saas' es el código correcto según el catálogo de bajas de Nave
-        # ("Cancelación desde el SAAS por motivo externo"): la baja la origina Odoo, no la terminal.
-        # No confundir con 'manual_disabled_by_user', que es la baja hecha DENTRO de la terminal.
-        payload = {
-            'reason': {
-                'code': 'disabled_from_saas',
-                'description': 'Cancelado desde Odoo POS'
-            }
-        }
-
+        payload = {'reason': dict(NAVE_CANCEL_REASON)}
         timeout = payment_method._nave_timeout('cancel')
 
         try:
-            response = requests.delete(api_url, json=payload, headers=headers, timeout=timeout)
-            response.raise_for_status()
+            try:
+                response = requests.delete(api_url, json=payload, headers=headers, timeout=timeout)
+                response.raise_for_status()
+            except requests.exceptions.HTTPError as e:
+                if not self._nave_reason_rejected(e):
+                    raise
+                # El texto del motivo no está documentado y Nave puede cambiarlo. Una baja sin
+                # motivo también pasa su validación, así que la cancelación no depende de él.
+                _logger.warning(
+                    "[pos_nave] Nave rechazó el motivo de baja de la intención %s; se reintenta "
+                    "sin motivo. Respuesta: %s", intent_id, self._nave_error_body(e),
+                )
+                headers_sin_cuerpo = {k: v for k, v in headers.items() if k != 'Content-Type'}
+                response = requests.delete(api_url, headers=headers_sin_cuerpo, timeout=timeout)
+                response.raise_for_status()
             return {'success': True}
         except requests.exceptions.RequestException as e:
-            # Nave responde 400 al intentar dar de baja una intención de terminal: su catálogo de
-            # errores sólo admite baja para payment_link, dynamic_qr y static_qr.
-            _logger.error("[pos_nave] Error cancelando intención en Nave: %s", e)
+            response = getattr(e, 'response', None)
+            _logger.error(
+                "[pos_nave] Nave no dio de baja la intención %s (HTTP %s). Respuesta: %s",
+                intent_id, getattr(response, 'status_code', '-'), self._nave_error_body(e) or e,
+            )
             return {'error': True, 'message': self._nave_error_message(e)}
 
     @api.model
