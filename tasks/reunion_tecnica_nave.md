@@ -207,6 +207,8 @@ Conviene verlo con la pantalla abierta. El detalle está en
    cuál es cada QR físico?
 5. ¿Qué términos usa la mesa de ayuda para credenciales, `pos_id`, tienda y medio de cobro? Los
    necesitamos para los modelos de correo de la guía de alta.
+6. ¿El formato del archivo `POS_ID-<CUIT>.xlsx` es estable, con esas cuatro columnas y los valores
+   `ECOMMERCE`, `LDP`, `NAVE POINT` y `QR`? La ayuda de los campos de Odoo los va a citar.
 
 - Respuesta:
 
