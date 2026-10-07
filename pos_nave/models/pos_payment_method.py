@@ -22,6 +22,14 @@ NAVE_TIMEOUTS = {
     'refund': 15,
 }
 
+# Cuánto vale una intención de cobro presencial, en segundos. Cinco minutos es holgado con el
+# cliente parado frente a la caja, y es la cota de cuánto puede quedar la terminal esperando.
+#
+# El punto de venta deriva de acá su propio tope de espera, así que este es el único lugar donde
+# se declara: tenerlo repetido en el navegador hacía que un cambio desincronizara los dos en
+# silencio, y el síntoma era que el cajero recibía el aviso equivocado al vencer un cobro.
+NAVE_INTENT_DURATION_SECONDS = 300
+
 
 class PosPaymentMethod(models.Model):
     _inherit = 'pos.payment.method'
@@ -129,7 +137,7 @@ class PosPaymentMethod(models.Model):
                     ]
                 }
             ],
-            'duration_time': 300
+            'duration_time': NAVE_INTENT_DURATION_SECONDS,
         }
 
         if payment_type == 'static_qr':
@@ -150,6 +158,11 @@ class PosPaymentMethod(models.Model):
             response = requests.post(api_url, json=payload, headers=headers, timeout=timeout)
             response.raise_for_status()
             data = response.json()
+            # El punto de venta necesita saber cuánto vale esta intención para no dejar de esperar
+            # antes de que Nave alcance a informar que venció. Viaja con la respuesta y no con la
+            # configuración del método porque describe esta intención, no cómo está configurado el
+            # medio de cobro.
+            data['nave_duration_seconds'] = NAVE_INTENT_DURATION_SECONDS
             return data
         except requests.exceptions.RequestException as e:
             _logger.error("[pos_nave] Error enviando pago a la terminal Nave: %s", e)

@@ -36,9 +36,18 @@ export class PaymentNave extends PaymentInterface {
     setup() {
         super.setup(...arguments);
         this.pollInterval = 3000; // 3 segundos entre consultas
-        // Tope del bucle de polling. Debe acompañar al duration_time que manda el backend
-        // (pos_payment_method.py), porque pasado ese plazo la intención ya no es cobrable.
-        this.pollTimeoutMs = 300000; // 5 minutos
+        // Respaldo por si la respuesta de la intención no trajera su plazo: un cobro nunca debe
+        // quedar esperando sin tope. El plazo real lo manda el backend en cada intención.
+        this.fallbackPollTimeoutMs = 300000; // 5 minutos
+        // Margen que se concede por encima del plazo de la intención, para que Nave alcance a
+        // informar el vencimiento antes de que cortemos por nuestra cuenta. Si cortáramos primero,
+        // el cajero leería "verificá la terminal" cuando no hay nada que verificar.
+        //
+        // Es proporcional para que acompañe a plazos distintos —con un plazo corto, un margen fijo
+        // sería más largo que el plazo mismo—, con un piso que cubra una consulta de estado y su
+        // procesamiento.
+        this.pollGraceRatio = 0.1;
+        this.pollGraceMinMs = 10000;
         // Cuántos fallos de transporte seguidos toleramos antes de cortar.
         this.maxTransportErrors = 3;
         this.pollingTimeout = null;
@@ -104,7 +113,7 @@ export class PaymentNave extends PaymentInterface {
                 line.set_payment_status("waitingCard");
                 this.isPolling = true;
                 this.transportErrors = 0;
-                this.pollDeadline = Date.now() + this.pollTimeoutMs;
+                this.pollDeadline = Date.now() + this._poll_timeout_ms(data.nave_duration_seconds);
                 return await this._poll_payment_status(line, payment_method_id, data.id);
             } else {
                 this._showError(_t("Respuesta inválida de Nave. Faltan datos."), _t("Error"));
@@ -352,6 +361,21 @@ export class PaymentNave extends PaymentInterface {
     /**
      * Corta el bucle y limpia el temporizador pendiente.
      */
+    /**
+     * Cuánto esperar como mucho, derivado del plazo con el que se creó la intención.
+     *
+     * El tope local es la red para cuando Nave no contesta: tiene que vencer *después* del plazo
+     * de la intención, nunca antes, para que el aviso de vencimiento le gane y el cajero entienda
+     * qué pasó.
+     */
+    _poll_timeout_ms(durationSeconds) {
+        if (!durationSeconds || durationSeconds <= 0) {
+            return this.fallbackPollTimeoutMs;
+        }
+        const durationMs = durationSeconds * 1000;
+        return durationMs + Math.max(durationMs * this.pollGraceRatio, this.pollGraceMinMs);
+    }
+
     _stop_polling() {
         this.isPolling = false;
         if (this.pollingTimeout) {

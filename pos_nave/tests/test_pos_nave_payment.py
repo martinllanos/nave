@@ -529,3 +529,25 @@ class TestPosNavePayment(TransactionCase):
         self.assertFalse(method._nave_error_code(self._http_error(502, '<html>', json_ok=False)))
         import requests as _requests
         self.assertFalse(method._nave_error_code(_requests.exceptions.ConnectionError("x")))
+
+    @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.post')
+    def test_29_intent_response_carries_its_duration(self, mock_post):
+        """El punto de venta necesita el plazo para no dejar de esperar antes que Nave.
+
+        Tenerlo repetido en el navegador hacía que un cambio desincronizara los dos en silencio, y
+        el cajero terminaba recibiendo el aviso de "verificá la terminal" cuando lo único que había
+        pasado era que la intención venció.
+        """
+        from odoo.addons.pos_nave.models.pos_payment_method import NAVE_INTENT_DURATION_SECONDS
+        mock_post.return_value = _mock_response({'id': 'intent-dur', 'external_payment_id': 'POS-DUR'})
+
+        res = self.pos_payment_method.nave_send_payment_intent(
+            self.pos_payment_method.id, amount=100.0, reference='POS-DUR'
+        )
+
+        self.assertEqual(res['id'], 'intent-dur', "El identificador tiene que seguir llegando igual")
+        self.assertEqual(res['nave_duration_seconds'], NAVE_INTENT_DURATION_SECONDS)
+        self.assertEqual(
+            mock_post.call_args[1]['json']['duration_time'], NAVE_INTENT_DURATION_SECONDS,
+            "El plazo que se informa debe ser el mismo que se le pidió a Nave",
+        )
