@@ -458,6 +458,50 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.29 El código que lee el cajero lo fabrica nuestro propio módulo (2026-10-07)
+
+C5 —cancelar desde la terminal— termina en el **mismo diálogo y el mismo motivo** que C6, el
+vencimiento: *"El cobro fue dado de baja: `payment_request_is_disabled`"*. La terminal vuelve a
+reposo y la línea queda reintentable, que es lo que ambos casos esperan, pero desde Odoo las dos
+situaciones son indistinguibles.
+
+Sondeando la API se ve por qué, y el código no viene de Nave como motivo:
+
+```
+intención viva          → GET …/payment_requests/{id} → 200 {"status": {"name": "PENDING"}}
+intención dada de baja  → GET …/payment_requests/{id} → 400 {"code": "payment_request_is_disabled",
+                                                              "message": "Payment request is disabled"}
+```
+
+O sea que una intención dada de baja **deja de poder consultarse**: no queda en estado `DISABLED`, y
+`payment_request_is_disabled` es el código del **error HTTP**, no un motivo de negocio.
+
+El backend traduce ese error a un estado sintético para que el POS cierre el cobro en vez de mostrar
+una falla técnica, lo cual está bien, pero de paso copia el nombre del error en `reason_code`
+(`pos_payment_method.py:223-228`). El JS lo imprime literal, y el cajero termina leyendo un código
+que inventó nuestro propio módulo.
+
+Lo irónico es que el JS ya tiene un mensaje legible para cuando **no** hay motivo —*"El cobro fue dado
+de baja en la terminal."*— que nunca se usa, porque el backend siempre inyecta el código
+(`payment_nave.js:237-240`).
+
+Ese mensaje tampoco sería del todo exacto: la baja puede venir de una cancelación en la terminal, de
+un vencimiento, o de que Nave no pudiera notificar al equipo. El mensaje correcto no debería afirmar
+cuál de las tres fue.
+
+#### 🟢 C4 queda destrabado
+
+El comentario del código sostiene que *"Nave responde 400 al intentar dar de baja una intención de
+terminal: su catálogo de errores sólo admite baja para `payment_link`, `dynamic_qr` y `static_qr`"*
+(`pos_payment_method.py:405-407`). **Ya no es cierto:**
+
+```
+DELETE /api/payment_requests/{id}  →  200 {"message": "Payment request deleted"}
+```
+
+Probado contra producción con una intención de Nave Point. La cancelación desde Odoo es posible, así
+que C4 deja de estar bloqueado por la API.
+
 ### 3.28 C6: el cobro vencido no cuelga el POS, pero el cajero lee un código (2026-10-07)
 
 Se lanzó un cobro de $123,45 a la terminal y no se tocó nada. Evidencia en
@@ -1574,7 +1618,7 @@ deciden cómo se escribe el fix de B11.
 | C2 | Cobro aprobado con chip | Orden POS → Tarjeta → insertar chip → aprobar | Línea `done`, orden validada, `transaction_id` guardado |✅ 2026-10-06, POS 1/0001: línea cobrada, orden facturada (`FA-C 00001-00000004`) y `transaction_id` guardado. Se pagó por **NFC**, no por chip. §3.27 |
 | C3 | Cobro rechazado | Tarjeta de rechazo en la terminal | Diálogo con el `reason_code`, línea en `retry`, el cajero puede reintentar | ⬜ |
 | C4 | Cancelación desde Odoo | Iniciar cobro → botón Cancel | `DELETE` a Nave y la **terminal vuelve a reposo**. Ojo: `send_payment_cancel` retorna `true` siempre, incluso si el DELETE falló (`payment_nave.js:185-190`) | ⬜ |
-| C5 | Cancelación desde la terminal | Iniciar cobro → cancelar en el equipo | Nave notifica `DISABLED` con `manual_disabled_by_user`. **Se espera loop infinito** (B4) | ⬜ |
+| C5 | Cancelación desde la terminal | Iniciar cobro → cancelar en el equipo | Nave notifica `DISABLED` con `manual_disabled_by_user`. **Se espera loop infinito** (B4) |⚠️ 2026-10-07: la terminal vuelve a reposo ("Ingresá el monto a cobrar") y el POS cierra la línea como reintentable. Pero el motivo que se le muestra al cajero es el mismo código que en C6, así que **no se distingue una cancelación de un vencimiento**. §3.29 |
 | C6 | Expiración de la intención | Iniciar cobro y no tocar nada 300 s | Nave marca `EXPIRED`. **Se espera loop infinito** (B4) |⚠️ 2026-10-07: **no hay loop infinito**. Nave no manda `EXPIRED` sino `DISABLED` con `payment_request_is_disabled`: la terminal da de baja la intención. La línea queda reintentable y no se contabiliza nada, pero el cajero lee el código crudo. §3.28 |
 | C7 | Salir de la pantalla de pago | Iniciar cobro → botón Back | La intención queda viva: **la terminal sigue cobrable**. No hay `close()` implementado | ⬜ |
 | C8 | Corte de red durante el polling 🔴 | Iniciar cobro y cortar la conexión de Odoo | **Se espera spinner infinito sin diálogo de error** (B4). Verificar que la única salida es "Force done" | ⬜ |
