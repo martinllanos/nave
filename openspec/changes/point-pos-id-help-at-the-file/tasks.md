@@ -26,5 +26,8 @@
       `.agent/rules.md` §6, y buscar en las ayudas cualquier identificador real. Verificar: 0 fallos,
       0 errores de lint, 0 hallazgos de severidad media o superior, y ningún UUID, número de serie
       ni código de vinculación en los textos nuevos.
-- [ ] 3.3 Desplegar y ver las ayudas en la configuración del proveedor y del método de pago del
+- [x] 3.3 Desplegar y ver las ayudas en la configuración del proveedor y del método de pago del
       punto de venta. Verificar: se leen completas al pasar el cursor sobre cada campo.
+      Verificado el 2026-10-07 con `payment_nave 18.0.1.12.1` y `pos_nave 18.0.1.10.2`: las tres
+      ayudas se leen completas, con sus saltos de línea y la lista de Nave Point y QR. Las capturas
+      no se guardan en el repo porque muestran el `client_id` y los `pos_id` de producción.
