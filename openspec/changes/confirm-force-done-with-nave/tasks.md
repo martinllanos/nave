@@ -48,8 +48,11 @@
 - [x] 4.2 Correr las suites de `payment_nave` y `pos_nave`, más flake8 y bandit según
       `.agent/rules.md` §6. Verificar: 0 fallos, 0 errores de lint y 0 hallazgos de severidad media
       o superior.
-- [ ] 4.3 Desplegar y probar con la terminal, con importes de $1.200 o menos: forzar la terminación
-      mientras espera la tarjeta, después de un rechazo de la terminal y después de una aprobación, y
-      con el navegador sin conexión mientras espera la tarjeta. Verificar: sólo la aprobación y la
-      confirmación manual dejan la venta cobrada, ningún desenlace tardío reabre una línea cobrada, y
-      los resultados quedan en el plan de homologación como reprueba de C9, con sus capturas.
+- [x] 4.3 Desplegar y probar con la terminal, con importes de $1.200 o menos: forzar la terminación
+      mientras espera la tarjeta, después de un rechazo de la terminal y con el navegador sin
+      conexión mientras espera la tarjeta. Verificar: ninguno de los tres deja la venta cobrada, un
+      rechazo produce un solo aviso, y los resultados quedan en el plan de homologación como reprueba
+      de C9, con sus capturas.
+- [ ] 4.4 Forzar la terminación sobre un cobro que Nave ya aprobó. Verificar: la venta queda cobrada
+      con los datos de la tarjeta, como un cobro normal. Diferida con acuerdo del usuario: exige un
+      cobro real que no se puede devolver mientras los reembolsos sigan bloqueados (N12).

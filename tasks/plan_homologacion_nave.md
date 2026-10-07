@@ -458,6 +458,29 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.33 Reprueba de C9: "Forzar terminación" consulta a Nave (2026-10-07)
+
+Corrección en `confirm-force-done-with-nave`. En una línea de Nave, *Forzar terminación* consulta a
+Nave y resuelve el cobro en curso con lo que responda; sólo si Nave no responde le pregunta al
+cajero si vio la aprobación. Evidencia en `docs/homologacion/evidencias/C9/reprueba_18.0.1.10.0/` y
+`reprueba_18.0.1.10.1/`.
+
+| Prueba | Versión | Resultado |
+|---|---|---|
+| A — forzar mientras la terminal espera la tarjeta | 18.0.1.10.0 | ✅ *"El cobro sigue en curso"*; la línea sigue esperando y *Validar* no se habilita |
+| B — rechazo por fondos sobre la misma intención | 18.0.1.10.0 | ✅ Un solo aviso *"Pago rechazado"*, línea reintentable, un solo desenlace en el log |
+| C — forzar con la PC sin conexión | 18.0.1.10.0 | 🔴 La pregunta *"No se pudo consultar a Nave"* aparecía, pero el polling cortaba por desconexión mientras el cajero la leía y la dejaba huérfana detrás: confirmar ya no tenía efecto |
+| C — repetida | 18.0.1.10.1 | ✅ La pregunta queda sola en pantalla mientras el cajero decide. *Volver* deja la línea esperando, el polling se reanuda y corta por desconexión como siempre, y no se cobra nada |
+| D — forzar sobre un cobro que Nave aprobó | — | ⏸️ Pendiente. Exige un cobro real que hoy no se puede devolver (reembolsos bloqueados por N12) y una ventana de 3 s antes de que el polling se entere solo. El camino es el mismo que el de un cobro aprobado normal (C0) |
+
+**Por qué falló C en la primera versión:** la pregunta al cajero y el polling competían por el
+mismo cobro. La corrección pausa el polling mientras la pregunta está abierta: el cobro queda en
+manos del cajero hasta que responde.
+
+**Durante el despliegue se encontró un token personal de GitHub en texto plano** en el remote del
+repo `nave` de `~/do-onlyone/odoo/custom/src/repos.yaml`, en el servidor. Se avisó para revocarlo y
+reemplazarlo por una credencial de sólo lectura fuera del archivo.
+
 ### 3.32 🔴 C9: "Forzar terminación" da por cobrada una venta que nadie pagó (2026-10-07)
 
 Cobro de $123,45 a la terminal con `pos_nave 18.0.1.9.0`. Mientras la línea decía *"Esperando la
@@ -1780,7 +1803,7 @@ deciden cómo se escribe el fix de B11.
 | C6 | Expiración de la intención | Iniciar cobro y no tocar nada 300 s | Nave marca `EXPIRED`. **Se espera loop infinito** (B4) |⚠️ 2026-10-07: **no hay loop infinito**. Nave no manda `EXPIRED` sino `DISABLED` con `payment_request_is_disabled`: la terminal da de baja la intención. La línea queda reintentable y no se contabiliza nada, pero el cajero lee el código crudo. §3.28. ✅ Reprueba con 18.0.1.9.0: esta vez Nave respondió `EXPIRED` a los 303 s y el cajero leyó *"Cobro expirado"*. Un vencimiento llega a veces como `EXPIRED` y a veces como baja; el aviso es correcto en los dos casos. §3.31 |
 | C7 | Salir de la pantalla de pago | Iniciar cobro → botón Back | La intención queda viva: **la terminal sigue cobrable**. No hay `close()` implementado | ⬜ |
 | C8 | Corte de red durante el polling 🔴 | Iniciar cobro y cortar la conexión de Odoo | **Se espera spinner infinito sin diálogo de error** (B4). Verificar que la única salida es "Force done" | ⬜ |
-| C9 | "Force done" con pago rechazado | Rechazar en la terminal y presionar Force done | La venta se cierra como cobrada sin cobro real. **Hallazgo a documentar y mitigar** | 🔴 2026-10-07: después de un rechazo el botón no aparece, pero mientras se espera la tarjeta *Forzar terminación* deja la línea en *"Pago exitoso"* con *Validar* habilitado, sin cobro y con la terminal todavía cobrable. Unos 3 min después, la baja devuelve la línea a reintentable. §3.32 |
+| C9 | "Force done" con pago rechazado | Rechazar en la terminal y presionar Force done | La venta se cierra como cobrada sin cobro real. **Hallazgo a documentar y mitigar** | 🔴 2026-10-07: después de un rechazo el botón no aparece, pero mientras se espera la tarjeta *Forzar terminación* deja la línea en *"Pago exitoso"* con *Validar* habilitado, sin cobro y con la terminal todavía cobrable. Unos 3 min después, la baja devuelve la línea a reintentable. §3.32. ✅ Reprueba con 18.0.1.10.1: el botón consulta a Nave; forzar mientras espera no da nada por cobrado, un rechazo da un solo aviso y sin conexión se pregunta al cajero sin que el polling le gane. Pendiente sólo el forzado sobre un cobro aprobado. §3.33 |
 | C10 | Terminal ocupada | Lanzar un cobro con otro en curso | `device_already_on_payment_flow` (`doc_point.md` §6). Verificar el mensaje al cajero | ⬜ |
 | C11 | Terminal con batería < 5% | Descargar la terminal | `low_battery`. Verificar manejo | ⬜ |
 | C12 | Datos en el ticket | Cobro aprobado → imprimir | **Hoy no se llama a `set_receipt_info()`**: el ticket no imprime marca, últimos 4 ni cupón, aunque la API los devuelve (`doc_point.md:104-138`). Confirmar si Nave lo exige |✅ 2026-10-06: el ticket sí se completa. Lleva marca, últimos cuatro, tipo, cupón, autorización, lote y emisor. §3.27 |
