@@ -479,14 +479,23 @@ El diálogo *"Operación bloqueada"* sólo se muestra cuando el estado es litera
 genérico: *"No se pudo realizar el pago. Hubo un problema al intentar procesarlo. Podés volver a
 intentarlo."*
 
-**Queda por confirmar con Nave qué significa `BLOCKED`.** Nuestro catálogo lo trata como bloqueo por
-seguridad o fraude, siguiendo lo que sugiere el nombre, pero acá llegó por un rechazo corriente. Si
-Nave lo usa para cualquier rechazo que no procesa el emisor, el mensaje tiene que cambiar; si lo
-reserva para fraude, entonces habría que entender por qué una tarjeta sin fondos lo disparó.
+**Confirmado con una segunda tarjeta distinta.** Repetido el cobro con otra tarjeta sin fondos, el
+resultado es idéntico: Nave devuelve `BLOCKED` y Odoo muestra el mismo aviso de seguridad. No fue una
+particularidad de la primera tarjeta: **Nave usa `BLOCKED` para rechazos corrientes**, y nuestro
+catálogo lo interpreta como fraude siguiendo lo que sugiere el nombre.
 
-**Un rechazo no imprime papel.** A diferencia del cobro aprobado, que sale con su cupón, en el rechazo
-la terminal sólo muestra el mensaje en pantalla. Para la evidencia de homologación hay que capturar
-la pantalla: no hay comprobante.
+El contraste con lo que muestra la propia terminal es lo que mide el daño:
+
+| | Mensaje |
+|---|---|
+| La terminal | *"La tarjeta con la que se intentó pagar no tiene el dinero necesario. Podés intentar pagar con otra."* |
+| Nuestro módulo | *"Nave bloqueó la operación por motivos de seguridad. Contactá a Nave antes de reintentar."* |
+
+Nave le dice al operador qué pasó y qué hacer. El módulo lo convierte en una alarma de fraude.
+
+**El comprobante de un rechazo es opcional, pero existe.** La terminal ofrece "Compartir comprobante"
+y puede imprimirlo: sale con `RECHAZADO`, la marca, los últimos cuatro, el importe y el código de
+operación. Sirve como evidencia igual que el de un cobro aprobado.
 
 #### Los tres mensajes que hay que corregir
 
@@ -496,7 +505,7 @@ Con C3, C5 y C6 ejecutados, el panorama de lo que lee el cajero queda completo:
 |---|---|---|
 | La intención venció (C6) | *"El cobro fue dado de baja: `payment_request_is_disabled`"* | un código que fabrica nuestro módulo |
 | Cancelación en la terminal (C5) | el mismo mensaje | indistinguible del anterior |
-| Tarjeta rechazada (C3) | *"Nave bloqueó la operación por motivos de seguridad. Contactá a Nave"* | manda a llamar al proveedor por un rechazo común |
+| Tarjeta rechazada (C3) | *"Nave bloqueó la operación por motivos de seguridad. Contactá a Nave"* | manda a llamar al proveedor por un rechazo común, confirmado con dos tarjetas |
 
 Los tres comparten la misma causa de fondo: el módulo le muestra al cajero el vocabulario de la API
 en lugar de decirle qué pasó y qué puede hacer.
