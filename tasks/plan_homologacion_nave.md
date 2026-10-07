@@ -1946,7 +1946,17 @@ Estructura sugerida: `evidencias/<ID_caso>/` con `pantalla.mp4|png`, `odoo.log`,
 - **N7** — ¿Hay rate limit de API, límite de monto o límite de intenciones concurrentes?
 - **N8** ✅ **RESUELTA (2026-09-21)** — Trámite hecho. Una sola `notification_url`
   (`https://www.onlyone.ar/payment/nave/webhook`) sirve para ambos ambientes.
-- **N12** 🟠 **ACOTADA (2026-10-05)** — **El endpoint de devolución existe; lo que falta es el
+- **N12** 🟠 **REPLANTEADA (2026-10-07)** — **Probablemente estábamos llamando al endpoint
+  equivocado.** La documentación vigente documenta las devoluciones en
+  `POST /integrations/payments/{id}/refunds`, un único endpoint que anula o devuelve según el estado
+  de liquidación, y no menciona `DELETE /api/payments/{id}`, que es el que usan los módulos. Lo más
+  probable es que el 403 de IAM sea el de una ruta vieja que sigue mapeada pero ya no se le habilita
+  a integradores nuevos. Detalle del endpoint y sus errores en `docs/nave_codigos_referencia.md` §8.
+  Lo que sigue: sondear el endpoint nuevo en sandbox con un pago inexistente y, si responde, migrar
+  las devoluciones de los dos módulos. Si responde `REFUND_NOT_ENABLED`, lo que hay que pedirle a
+  Nave es que habilite las devoluciones en el perfil del comercio.
+
+  *Nota original (2026-10-05):* **El endpoint de devolución existe; lo que falta es el
   permiso.** Ya no hay que preguntar si la ruta sigue viva: el sondeo contra sandbox la distingue de
   una inexistente (§3.21). `DELETE /api/payments/{payment_id}` responde *"User is not authorized to
   access this resource"*, el mensaje de IAM que devuelve el gateway cuando la ruta está mapeada pero

@@ -190,3 +190,51 @@ cinco veces y después se descarta.
 
 Respuestas exitosas: `CANCELLED` (*"El pago fue cancelado exitosamente."*) y `REFUNDED` (*"El pago
 fue reembolsado exitosamente"*).
+
+## 8. Cancelación y devolución de pagos
+
+Agregado el 2026-10-07, de la misma documentación.
+
+| | Endpoint |
+|---|---|
+| Producción | `POST https://api.ranty.io/integrations/payments/{id}/refunds` |
+| Sandbox — Nave Point | `POST https://e3-api.ranty.io/integrations/payments/{id}/refunds` |
+| Sandbox — Checkout, Link de pago, QR | `POST https://api-sandbox.ranty.io/integrations/payments/{id}/refunds` |
+
+`{id}` es el identificador del **pago**, no el de la intención.
+
+Un único endpoint para los dos casos. Nave lo resuelve según el estado de liquidación:
+
+- **Cancelación**, dentro de las primeras 24 h y antes del cierre de lote: el pago queda `CANCELLED`.
+- **Devolución**, pasadas las 24 h o con el lote cerrado: el pago queda `REFUNDED`.
+
+*"El integrador no necesita invocar endpoints diferentes para cada caso."* Requiere que el pago esté
+`APPROVED`. La respuesta trae el pago con su estado final.
+
+Atributos del body:
+
+| Atributo | Descripción | Tipo |
+|---|---|---|
+| `amount` | Monto de la compra a devolver (incluye moneda y valor). | Object |
+| `tip_amount` | Monto de la propina a devolver (incluye moneda y valor). | Object |
+
+El único ejemplo de body de la documentación lleva sólo `tip_amount`. No está documentado si una
+devolución total se pide con el body vacío o con `amount`.
+
+Errores:
+
+| Código | Descripción |
+|---|---|
+| `INVALID_SCHEMA` | El body o los path params no cumplen el schema |
+| `PROFILE_NOT_FOUND` | No existe un perfil de ejecución aplicable al pago |
+| `PROFILE_INVALID_CONFIG` | El perfil aplicable tiene configuración incompleta |
+| `REFUND_NOT_ENABLED` | El perfil no tiene habilitados los refunds |
+| `PAYMENT_DOES_NOT_HAVE_A_TIP_AMOUNT` | Se solicitó devolución de propina pero no hay saldo de propina disponible |
+| `TIP_AMOUNT_MUST_BE_GREATER_THAN_ZERO` | tip_amount debe ser mayor a 0 |
+| `THE_TIP_AMOUNT_MUST_NOT_EXCEED_THE_AVAILABLE_TIP_VALUE` | El monto de propina supera el saldo disponible |
+| `INVALID_PAYMENT_STATUS` | El pago no está en un estado que permita realizar el refund |
+| `REFUND_PERIOD_EXPIRED` | El pago superó la ventana temporal permitida para realizar el refund |
+
+**Diferencia con el módulo:** `payment_nave` y `pos_nave` piden la devolución con
+`DELETE /api/payments/{payment_id}`, el endpoint de la documentación anterior (`tasks/doc_*.md`).
+La documentación vigente no lo menciona, y en sandbox responde con un 403 de IAM (N12).
