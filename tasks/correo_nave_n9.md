@@ -1,5 +1,65 @@
 # Borradores de correo a Nave
 
+## Borrador 6 — habilitación de devoluciones (2026-10-07)
+
+> Correo **nuevo** a `integraciones@navenegocios.com`, con copia a Jonathan Castillo.
+> **Reemplaza el punto 2 del borrador 4**, que pedía permiso sobre `DELETE /api/payments/{id}`: ese
+> endpoint ya no figura en la documentación vigente, y el documentado tampoco nos responde.
+> Si el borrador 4 no se envió, su punto 1 (`pos_id` de link de pago en sandbox) ya no hace falta:
+> en producción tenemos los cuatro `pos_id`.
+> Las mismas preguntas, con más contexto, están en `tasks/reunion_tecnica_nave.md` para hacerlas en
+> vivo. Ver `plan_homologacion_nave.md`, N12.
+
+---
+
+**Asunto:** Habilitación de devoluciones por API — Be onlyone, CUIT 20-26253453-8
+
+Hola, buen día.
+
+Les escribo desde **Be onlyone** (CUIT **20-26253453-8**). La integración ya cobra en producción con
+Nave Point, QR y checkout. Lo único que no podemos hacer por API son las **cancelaciones y
+devoluciones**.
+
+Según la documentación del DevPortal, se piden con:
+
+```
+POST https://api.ranty.io/integrations/payments/{id}/refunds
+```
+
+Lo probamos con un token válido, en sandbox y en producción, y la API responde:
+
+```
+403 — "User is not authorized to access this resource because no identity-based policy
+       allows the execute-api:Invoke action"
+```
+
+Los tokens de nuestros dos `client_id` traen estos permisos:
+
+```
+scope = write.payment_request read.payment read.payment_request
+```
+
+Entendemos que falta el permiso de escritura sobre pagos. Les pedimos:
+
+1. **Habilitar las devoluciones para nuestros `client_id` de sandbox y de producción.**
+2. **Confirmar que las devoluciones estén habilitadas en el perfil del comercio**, para no recibir
+   `REFUND_NOT_ENABLED` una vez que tengamos el permiso.
+3. **Confirmar el body de una devolución total.** El ejemplo de la documentación incluye sólo
+   `tip_amount`: ¿una devolución total se envía con el body vacío o con `amount`?
+
+Una consulta más: nuestra integración usaba `DELETE /api/payments/{id}`, de una versión anterior de
+la documentación. ¿Ese endpoint está discontinuado? Lo vamos a reemplazar por el documentado.
+
+Quedamos a la espera. Muchas gracias.
+
+Saludos cordiales,
+
+**Martín Llanos**
+Be onlyone — CUIT 20-26253453-8
+martinllanos@onlyone.com.ar
+
+---
+
 ## Borrador 5 — datos para publicar en Odoo Apps (2026-10-06)
 
 > Correo **nuevo**, con el documento `docs/requerimientos_publicacion_odoo_apps.md` adjunto.
@@ -73,6 +133,9 @@ que falta el identificador del medio **link de pago**. ¿Nos lo pueden proporcio
 de sandbox?
 
 ### 2. Habilitación de devoluciones por API
+
+> ⚠️ **Reemplazado por el borrador 6** (2026-10-07). Este punto pide permiso sobre un endpoint que
+> ya no está documentado.
 
 Necesitamos **habilitar las devoluciones** para nuestras credenciales. Al invocar
 
