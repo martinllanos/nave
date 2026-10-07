@@ -458,6 +458,46 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.32 🔴 C9: "Forzar terminación" da por cobrada una venta que nadie pagó (2026-10-07)
+
+Cobro de $123,45 a la terminal con `pos_nave 18.0.1.9.0`. Mientras la línea decía *"Esperando la
+tarjeta"*, se tocó **Forzar terminación** (*Force done*) sin acercar ninguna tarjeta. Evidencia en
+`docs/homologacion/evidencias/C9/`, numerada en orden.
+
+**Qué pasó:**
+
+| Momento | POS | Terminal / Nave |
+|---|---|---|
+| 11:40:48 | Se envía el cobro: *"Esperando la tarjeta"* | Pide la tarjeta |
+| Forzar terminación | **"Pago exitoso", restante $0,00, *Validar* habilitado** | Sigue esperando la tarjeta: el cobro sigue vivo |
+| Mientras tanto | El POS sigue consultando a Nave cada 3 s | — |
+| 11:43:57 (189 s) | Aviso *"Cobro dado de baja"*; la línea vuelve a *"Volver a intentar"* | *"Se cumplió el tiempo de espera para pagar"* |
+
+**El hallazgo:** durante unos tres minutos, el POS muestra como cobrada una venta sin cobro, y el
+cajero puede validarla. Si la valida, la venta se cierra y se imprime el ticket como pagada con Nave,
+sin que Nave haya cobrado nada. La intención además sigue viva en la terminal, así que el cliente
+todavía podría pagar. La validación automática está desactivada en `POS 1`: con ella activa, la
+venta se cerraría en el acto, sin que el cajero llegue a tocar *Validar*.
+
+**Por qué:** *Forzar terminación* es del core de Odoo (`payment_screen.js:606`). Marca la línea
+como cobrada sin consultar al proveedor, sin detener el polling y sin dar de baja la intención. Está
+pensado para terminales locales que pierden la conexión: el cajero vio la aprobación en el equipo y
+Odoo no se enteró. Con Nave ese caso no hace falta adivinarlo, porque el estado siempre se puede
+consultar a la API.
+
+**Lo que salva parcialmente la situación** es que el polling no se detiene: si el cajero no validó
+antes de que Nave informe el desenlace, la línea vuelve a *"Volver a intentar"*. No se probó qué
+pasa si el desenlace llega después de validar, porque eso dejaría una venta falsa en producción.
+
+**El escenario de la matriz no puede ocurrir.** La matriz decía *"rechazar en la terminal y
+presionar Force done"*. Después de un rechazo, el módulo deja la línea en `retry` y Odoo no muestra
+el botón. El riesgo está **antes** del desenlace, mientras se espera la tarjeta.
+
+**Dato al margen: la terminal tiene su propio tope de unos 3 minutos.** Dio de baja la intención a
+los 189 s (*"Se cumplió el tiempo de espera para pagar"*), antes de los 300 s que se le piden a
+Nave. Eso explica la primera corrida de C6 (§3.28), que terminó en baja. En la reprueba (§3.31)
+llegó `EXPIRED` a los 303 s, así que el tope de la terminal no siempre actúa; falta entender cuándo.
+
 ### 3.31 Reprueba de C3: el motivo se leía del objeto equivocado (2026-10-07)
 
 Reprueba de C3 con `pos_nave 18.0.1.8.0` desplegado: cobro de $123,45 a la terminal con una tarjeta
@@ -1740,7 +1780,7 @@ deciden cómo se escribe el fix de B11.
 | C6 | Expiración de la intención | Iniciar cobro y no tocar nada 300 s | Nave marca `EXPIRED`. **Se espera loop infinito** (B4) |⚠️ 2026-10-07: **no hay loop infinito**. Nave no manda `EXPIRED` sino `DISABLED` con `payment_request_is_disabled`: la terminal da de baja la intención. La línea queda reintentable y no se contabiliza nada, pero el cajero lee el código crudo. §3.28. ✅ Reprueba con 18.0.1.9.0: esta vez Nave respondió `EXPIRED` a los 303 s y el cajero leyó *"Cobro expirado"*. Un vencimiento llega a veces como `EXPIRED` y a veces como baja; el aviso es correcto en los dos casos. §3.31 |
 | C7 | Salir de la pantalla de pago | Iniciar cobro → botón Back | La intención queda viva: **la terminal sigue cobrable**. No hay `close()` implementado | ⬜ |
 | C8 | Corte de red durante el polling 🔴 | Iniciar cobro y cortar la conexión de Odoo | **Se espera spinner infinito sin diálogo de error** (B4). Verificar que la única salida es "Force done" | ⬜ |
-| C9 | "Force done" con pago rechazado | Rechazar en la terminal y presionar Force done | La venta se cierra como cobrada sin cobro real. **Hallazgo a documentar y mitigar** | ⬜ |
+| C9 | "Force done" con pago rechazado | Rechazar en la terminal y presionar Force done | La venta se cierra como cobrada sin cobro real. **Hallazgo a documentar y mitigar** | 🔴 2026-10-07: después de un rechazo el botón no aparece, pero mientras se espera la tarjeta *Forzar terminación* deja la línea en *"Pago exitoso"* con *Validar* habilitado, sin cobro y con la terminal todavía cobrable. Unos 3 min después, la baja devuelve la línea a reintentable. §3.32 |
 | C10 | Terminal ocupada | Lanzar un cobro con otro en curso | `device_already_on_payment_flow` (`doc_point.md` §6). Verificar el mensaje al cajero | ⬜ |
 | C11 | Terminal con batería < 5% | Descargar la terminal | `low_battery`. Verificar manejo | ⬜ |
 | C12 | Datos en el ticket | Cobro aprobado → imprimir | **Hoy no se llama a `set_receipt_info()`**: el ticket no imprime marca, últimos 4 ni cupón, aunque la API los devuelve (`doc_point.md:104-138`). Confirmar si Nave lo exige |✅ 2026-10-06: el ticket sí se completa. Lleva marca, últimos cuatro, tipo, cupón, autorización, lote y emisor. §3.27 |
