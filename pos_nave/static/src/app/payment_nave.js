@@ -159,6 +159,8 @@ export class PaymentNave extends PaymentInterface {
                 transportErrors: 0,
                 timer: null,
                 settled: false,
+                // Mientras el cajero responde si vio la aprobación (ver force_done).
+                awaitingCashier: false,
                 resolve,
             };
             this._poll(this.charge);
@@ -171,6 +173,13 @@ export class PaymentNave extends PaymentInterface {
      */
     async _poll(charge) {
         if (charge.settled) {
+            return;
+        }
+        // El cajero está decidiendo si vio la aprobación: el cobro queda en sus manos. Sin esta
+        // pausa, con la red caída el polling cortaba por desconexión mientras el cajero leía la
+        // pregunta, y su respuesta ya no tenía efecto.
+        if (charge.awaitingCashier) {
+            this._schedule_next_poll(charge);
             return;
         }
 
@@ -198,8 +207,13 @@ export class PaymentNave extends PaymentInterface {
             return;
         }
 
-        // Mientras esperábamos la respuesta, el cobro pudo resolverse por otro lado.
+        // Mientras esperábamos la respuesta, el cobro pudo resolverse por otro lado, o el cajero
+        // pudo quedar a cargo.
         if (charge.settled) {
+            return;
+        }
+        if (charge.awaitingCashier) {
+            this._schedule_next_poll(charge);
             return;
         }
 
@@ -377,6 +391,9 @@ export class PaymentNave extends PaymentInterface {
         }
 
         if (!data || data.error) {
+            if (charge) {
+                charge.awaitingCashier = true;
+            }
             const confirmed = await ask(this.env.services.dialog, {
                 title: _t("No se pudo consultar a Nave"),
                 body: _t(
@@ -386,7 +403,14 @@ export class PaymentNave extends PaymentInterface {
                 confirmLabel: _t("Vi la aprobación"),
                 cancelLabel: _t("Volver"),
             });
+            if (charge) {
+                charge.awaitingCashier = false;
+            }
             if (!confirmed) {
+                if (charge) {
+                    // Se reanuda desde cero: los fallos de antes de la pregunta no cuentan.
+                    charge.transportErrors = 0;
+                }
                 return false;
             }
             if (charge) {

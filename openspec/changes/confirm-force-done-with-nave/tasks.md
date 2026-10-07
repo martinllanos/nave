@@ -36,7 +36,8 @@
       los dos casos la línea sigue esperando y el polling continúa.
 - [x] 3.4 Si Nave no responde, pedir confirmación de que el cajero vio la aprobación en la terminal o
       en el cupón. Si confirma, terminar el cobro como exitoso y detener el polling; si no, no
-      cambiar nada. Verificar: sin la confirmación la línea no queda cobrada.
+      cambiar nada. Mientras la pregunta está abierta, pausar el polling. Verificar: sin la
+      confirmación la línea no queda cobrada, y con la red caída la pregunta no queda huérfana.
 - [x] 3.5 Si no hay un cobro en curso en la pantalla, consultar igual y aplicar el desenlace a la
       línea, delegando en el core el caso aprobado. Verificar: después de recargar el POS con una
       línea esperando, el botón no da por cobrado un cobro que Nave no aprobó.

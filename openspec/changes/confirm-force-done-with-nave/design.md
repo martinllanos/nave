@@ -82,6 +82,15 @@ y el polling se detiene. Si no confirma, no cambia nada.
 el cajero. La confirmación explícita impide que se use por reflejo para salir de la espera, que es
 lo que se reprodujo en C9.
 
+Mientras la pregunta está abierta, el cobro queda en manos del cajero: el polling se pausa —no
+consulta, no cuenta fallos de conexión y no vence— y se reanuda desde cero si el cajero vuelve sin
+confirmar.
+
+*Por qué la pausa*: la primera versión no la tenía, y la prueba con la terminal mostró el problema.
+Con la red caída, el polling acumuló sus fallos mientras el cajero leía la pregunta, dio el cobro
+por fallido y dejó la pregunta abierta detrás, sin efecto. Un cajero que sí vio la aprobación la
+confirmaba en vano y quedaba con una línea reintentable: el camino a cobrarle dos veces al cliente.
+
 Se usa el diálogo de confirmación que el POS ya trae (`ask`, de `make_awaitable_dialog`).
 
 ### Un cobro terminado no se reabre

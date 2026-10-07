@@ -40,7 +40,8 @@ Una vez que un cobro quedó cobrado, ninguna respuesta posterior DEBE devolverlo
 - **WHEN** el cajero fuerza la terminación y no se puede consultar a Nave
 - **THEN** el punto de venta le pide que confirme que vio la aprobación en la terminal o en el
   cupón antes de dar el cobro por cobrado
-- **AND** si no lo confirma, el cobro no se da por cobrado
+- **AND** si lo confirma, el cobro queda cobrado; si no lo confirma, no se da por cobrado
+- **AND** mientras el cajero no responde, el punto de venta no resuelve el cobro por su cuenta
 
 #### Scenario: Una respuesta llega después de dar el cobro por terminado
 
