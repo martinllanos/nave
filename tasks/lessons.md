@@ -18,6 +18,10 @@
 
 - **Cuando una API tiene dos objetos con estado, preguntarse de cuál es cada dato.** (2026-10-07) Nave tiene intención y pago, cada uno con su estado y su motivo. El módulo ya traía el pago en cada consulta y leía el motivo de la intención. Mirar el nombre del campo (`reason_name`) no alcanza: hay que ver de qué objeto cuelga.
 
+- **Una red caída no falla siempre igual: probar las dos formas.** (2026-10-07) En C8, con el navegador sin conexión la consulta fallaba al instante y el POS daba el cobro por fallido mientras la terminal seguía cobrando; con el cable desenchufado la misma consulta quedaba colgada y el POS esperaba sin límite. Eran dos defectos distintos con el mismo origen. Al probar cortes, reproducir un fallo rápido (*Archivo › Trabajar sin conexión* en Firefox) y uno colgado (cable desenchufado), y no dar por cubierto el caso con uno solo. Toda llamada que pueda quedar esperando necesita su propio tope de tiempo.
+
+- **El despliegue toma lo que está en GitHub cuando arranca el `build`, no cuando termina.** (2026-10-07) Dos veces se desplegó la versión anterior: una porque el push llegó después de que la construcción clonara el repo, y otra porque se actualizó el módulo sin reiniciar el servicio con la imagen nueva. `-u` no da error con código viejo. Después de cada despliegue, comparar la versión instalada y el hash de los archivos del contenedor contra el repo antes de pedir una prueba con la terminal.
+
 ## ✅ Patrones a Seguir (Best Practices)
 *(Ejemplos: Usar subagentes para la lectura de logs pesados)*
 
