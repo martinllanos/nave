@@ -458,6 +458,49 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.30 🔴 C3: un rechazo por fondos le dice al cajero que llame a Nave (2026-10-07)
+
+Cobro de $123,45 a la terminal, pagado con una tarjeta sin fondos. Evidencia en
+`docs/homologacion/evidencias/C3/`.
+
+**Lo que hace bien:** la línea de pago queda reintentable, no se genera orden ni asiento, y la venta
+sigue abierta para que el cajero pida otra tarjeta.
+
+**Lo que está mal es lo que lee el cajero:**
+
+> *"Nave bloqueó la operación por motivos de seguridad. **Contactá a Nave antes de reintentar.**"*
+
+La tarjeta no tenía fondos. No hay nada que contactar: hay que pedir otra tarjeta. Ese mensaje manda
+al cajero a llamar al proveedor en medio de una venta, con el cliente esperando, por un rechazo de
+los más comunes que existen.
+
+El diálogo *"Operación bloqueada"* sólo se muestra cuando el estado es literalmente `BLOCKED`
+(`payment_nave.js:247`), así que es lo que Nave devolvió. La terminal, en cambio, mostró un mensaje
+genérico: *"No se pudo realizar el pago. Hubo un problema al intentar procesarlo. Podés volver a
+intentarlo."*
+
+**Queda por confirmar con Nave qué significa `BLOCKED`.** Nuestro catálogo lo trata como bloqueo por
+seguridad o fraude, siguiendo lo que sugiere el nombre, pero acá llegó por un rechazo corriente. Si
+Nave lo usa para cualquier rechazo que no procesa el emisor, el mensaje tiene que cambiar; si lo
+reserva para fraude, entonces habría que entender por qué una tarjeta sin fondos lo disparó.
+
+**Un rechazo no imprime papel.** A diferencia del cobro aprobado, que sale con su cupón, en el rechazo
+la terminal sólo muestra el mensaje en pantalla. Para la evidencia de homologación hay que capturar
+la pantalla: no hay comprobante.
+
+#### Los tres mensajes que hay que corregir
+
+Con C3, C5 y C6 ejecutados, el panorama de lo que lee el cajero queda completo:
+
+| Situación | Lo que lee hoy | Problema |
+|---|---|---|
+| La intención venció (C6) | *"El cobro fue dado de baja: `payment_request_is_disabled`"* | un código que fabrica nuestro módulo |
+| Cancelación en la terminal (C5) | el mismo mensaje | indistinguible del anterior |
+| Tarjeta rechazada (C3) | *"Nave bloqueó la operación por motivos de seguridad. Contactá a Nave"* | manda a llamar al proveedor por un rechazo común |
+
+Los tres comparten la misma causa de fondo: el módulo le muestra al cajero el vocabulario de la API
+en lugar de decirle qué pasó y qué puede hacer.
+
 ### 3.29 El código que lee el cajero lo fabrica nuestro propio módulo (2026-10-07)
 
 C5 —cancelar desde la terminal— termina en el **mismo diálogo y el mismo motivo** que C6, el
@@ -1616,7 +1659,7 @@ deciden cómo se escribe el fix de B11.
 | C0 | Ruteo a la terminal correcta 🔴 | Lanzar un cobro con el `pos_id` actual | El cobro **aparece en la terminal `L40000978`**. Si no aparece, el `pos_id` es el de e-commerce (§3.5) y hay que pedirle a Nave el de la terminal |✅ 2026-10-06: el cobro apareció en la terminal **L40037644**, la del `pos_id` configurado. §3.27 |
 | C1 | Contrato de estados 🔴 | Cobrar y capturar la respuesta cruda de `GET /api/payment_requests/{id}` | Documentar la forma exacta de `status` y el catálogo completo de valores. **Todo el polling depende de una suposición del código** (`payment_nave.js:124`: *"suponiendo estructura {status:{name:...}}"*) | ✅ 2026-10-05: forma capturada en §3.20. La suposición es correcta en la intención, pero **no** dentro de `payment_attempts` |
 | C2 | Cobro aprobado con chip | Orden POS → Tarjeta → insertar chip → aprobar | Línea `done`, orden validada, `transaction_id` guardado |✅ 2026-10-06, POS 1/0001: línea cobrada, orden facturada (`FA-C 00001-00000004`) y `transaction_id` guardado. Se pagó por **NFC**, no por chip. §3.27 |
-| C3 | Cobro rechazado | Tarjeta de rechazo en la terminal | Diálogo con el `reason_code`, línea en `retry`, el cajero puede reintentar | ⬜ |
+| C3 | Cobro rechazado | Tarjeta de rechazo en la terminal | Diálogo con el `reason_code`, línea en `retry`, el cajero puede reintentar |🔴 2026-10-07: la línea queda reintentable y no se contabiliza nada, pero Nave devuelve `BLOCKED` y el cajero lee *"Nave bloqueó la operación por motivos de seguridad. Contactá a Nave antes de reintentar"* por una tarjeta sin fondos. §3.30 |
 | C4 | Cancelación desde Odoo | Iniciar cobro → botón Cancel | `DELETE` a Nave y la **terminal vuelve a reposo**. Ojo: `send_payment_cancel` retorna `true` siempre, incluso si el DELETE falló (`payment_nave.js:185-190`) | ⬜ |
 | C5 | Cancelación desde la terminal | Iniciar cobro → cancelar en el equipo | Nave notifica `DISABLED` con `manual_disabled_by_user`. **Se espera loop infinito** (B4) |⚠️ 2026-10-07: la terminal vuelve a reposo ("Ingresá el monto a cobrar") y el POS cierra la línea como reintentable. Pero el motivo que se le muestra al cajero es el mismo código que en C6, así que **no se distingue una cancelación de un vencimiento**. §3.29 |
 | C6 | Expiración de la intención | Iniciar cobro y no tocar nada 300 s | Nave marca `EXPIRED`. **Se espera loop infinito** (B4) |⚠️ 2026-10-07: **no hay loop infinito**. Nave no manda `EXPIRED` sino `DISABLED` con `payment_request_is_disabled`: la terminal da de baja la intención. La línea queda reintentable y no se contabiliza nada, pero el cajero lee el código crudo. §3.28 |
