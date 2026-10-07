@@ -38,7 +38,7 @@
 - [x] 4.2 Correr las suites de `payment_nave` y `pos_nave`, más flake8 y bandit según
       `.agent/rules.md` §6. Verificar: 0 fallos, 0 errores de lint y 0 hallazgos de severidad media o
       superior.
-- [ ] 4.3 Desplegar y, antes de tocar nada, confirmar desde la consola del navegador que la línea del
+- [x] 4.3 Desplegar y, antes de tocar nada, confirmar desde la consola del navegador que la línea del
       pedido 104 conserva el identificador de la intención. Después reintentarlo. Verificar: la línea
       queda cobrada con los datos de la tarjeta de los $150 aprobados y no aparece un cobro nuevo en
       la terminal ni en el log.
