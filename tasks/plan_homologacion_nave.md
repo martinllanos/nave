@@ -1967,6 +1967,10 @@ Estructura sugerida: `evidencias/<ID_caso>/` con `pantalla.mp4|png`, `odoo.log`,
   intenciones y leer pagos, pero **no tiene ningún permiso de escritura sobre pagos**, y una
   devolución lo es. Eso explica el 403 en los dos endpoints.
 
+  **Producción tiene la misma configuración.** Leído en el servidor el mismo día, del token de
+  producción (otro `client_id`): `scope = write.payment_request read.payment read.payment_request`.
+  El bloqueo es de los dos ambientes.
+
   **Pedido concreto a Nave:** agregar a nuestro `client_id`, en sandbox y en producción, el permiso
   que habilita `POST /integrations/payments/{id}/refunds`, y confirmar que las devoluciones estén
   habilitadas en el perfil del comercio (si no, la API respondería `REFUND_NOT_ENABLED`). Conviene
