@@ -458,6 +458,33 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.28 C6: el cobro vencido no cuelga el POS, pero el cajero lee un código (2026-10-07)
+
+Se lanzó un cobro de $123,45 a la terminal y no se tocó nada. Evidencia en
+`docs/homologacion/evidencias/C6/`.
+
+**El pronóstico del plan ya no aplica.** Decía *"se espera loop infinito"*; el bucle corta, la línea
+de pago queda reintentable con su botón "Volver a intentar", y no se contabiliza nada: el POS siguió
+con la venta abierta y sin orden generada.
+
+**El vencimiento no llega como `EXPIRED`.** La terminal muestra *"Se cumplió el tiempo para pagar"* y
+**da de baja** la intención, así que Nave informa `DISABLED` con motivo `payment_request_is_disabled`.
+El módulo tiene las dos ramas y la que ocurre en el presencial es la de baja, no la de expiración.
+
+**El arreglo de `align-pos-wait-with-intent-deadline` hizo su trabajo igual.** El tope local pasó de
+300 a 330 segundos, de modo que el aviso de Nave llegó antes de que el POS cortara por su cuenta. Con
+los 300 exactos de antes habría ganado el tope local y el cajero habría leído *"verificá el estado en
+la terminal"*, que es el aviso de "no sé qué pasó".
+
+#### Lo que queda mal: el cajero lee `payment_request_is_disabled`
+
+El diálogo dice textualmente *"El cobro fue dado de baja: payment_request_is_disabled"*. El motivo se
+toma de `status.reason_name || status.reason_code` y se muestra tal cual
+(`payment_nave.js:215,237`). Cuando Nave manda un código técnico, el cajero recibe un código técnico.
+
+La propia terminal, en la misma situación, le dice al operador *"Pasaron varios minutos desde que
+iniciaste este cobro. Podés crear uno nuevo"*. Esa es la forma de decirlo.
+
 ### 3.27 El cobro presencial funciona de punta a punta (2026-10-06)
 
 Primer cobro con la terminal física, ya en producción. Orden `POS 1/0001` por $50,00: el monto salió
@@ -1548,7 +1575,7 @@ deciden cómo se escribe el fix de B11.
 | C3 | Cobro rechazado | Tarjeta de rechazo en la terminal | Diálogo con el `reason_code`, línea en `retry`, el cajero puede reintentar | ⬜ |
 | C4 | Cancelación desde Odoo | Iniciar cobro → botón Cancel | `DELETE` a Nave y la **terminal vuelve a reposo**. Ojo: `send_payment_cancel` retorna `true` siempre, incluso si el DELETE falló (`payment_nave.js:185-190`) | ⬜ |
 | C5 | Cancelación desde la terminal | Iniciar cobro → cancelar en el equipo | Nave notifica `DISABLED` con `manual_disabled_by_user`. **Se espera loop infinito** (B4) | ⬜ |
-| C6 | Expiración de la intención | Iniciar cobro y no tocar nada 300 s | Nave marca `EXPIRED`. **Se espera loop infinito** (B4) | ⬜ |
+| C6 | Expiración de la intención | Iniciar cobro y no tocar nada 300 s | Nave marca `EXPIRED`. **Se espera loop infinito** (B4) |⚠️ 2026-10-07: **no hay loop infinito**. Nave no manda `EXPIRED` sino `DISABLED` con `payment_request_is_disabled`: la terminal da de baja la intención. La línea queda reintentable y no se contabiliza nada, pero el cajero lee el código crudo. §3.28 |
 | C7 | Salir de la pantalla de pago | Iniciar cobro → botón Back | La intención queda viva: **la terminal sigue cobrable**. No hay `close()` implementado | ⬜ |
 | C8 | Corte de red durante el polling 🔴 | Iniciar cobro y cortar la conexión de Odoo | **Se espera spinner infinito sin diálogo de error** (B4). Verificar que la única salida es "Force done" | ⬜ |
 | C9 | "Force done" con pago rechazado | Rechazar en la terminal y presionar Force done | La venta se cierra como cobrada sin cobro real. **Hallazgo a documentar y mitigar** | ⬜ |

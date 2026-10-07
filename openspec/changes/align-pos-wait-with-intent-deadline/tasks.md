@@ -24,6 +24,6 @@
 - [x] 3.1 Subir la versión del módulo. Verificar: el manifiesto declara la versión nueva.
 - [x] 3.2 Correr la suite de `payment_nave` y `pos_nave`, más flake8 y bandit según `.agent/rules.md`
       §6. Verificar: 0 fallos, 0 errores de lint y 0 hallazgos de severidad media o superior.
-- [ ] 3.3 Desplegar y ejecutar el caso C6 con la terminal: lanzar un cobro y no tocar nada hasta que
+- [x] 3.3 Desplegar y ejecutar el caso C6 con la terminal: lanzar un cobro y no tocar nada hasta que
       venza. Verificar: el cajero recibe el aviso de que la intención expiró, no el de verificar la
       terminal, y la línea queda reintentable. Registrarlo en el plan de homologación.
