@@ -4,36 +4,11 @@ import { _t } from "@web/core/l10n/translation";
 import { PaymentInterface } from "@point_of_sale/app/payment/payment_interface";
 import { AlertDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
 import { register_payment_method } from "@point_of_sale/app/store/pos_store";
+import { ask } from "@point_of_sale/app/store/make_awaitable_dialog";
 
-/**
- * Estados que puede devolver Nave al consultar el recurso.
- *
- * Importante: el polling consulta GET /api/payment_requests/{id}, que devuelve el estado de la
- * INTENCIÓN, cuyo vocabulario es distinto del estado del PAGO (GET /ranty-payments/payments/{id}).
- * Un cobro exitoso en la intención es SUCCESS_PROCESSED, no APPROVED. Aceptamos ambos vocabularios
- * para ser tolerantes si el endpoint devolviera el del pago.
- */
-const NAVE_STATUS = {
-    // Cobro exitoso
-    SUCCESS: ["SUCCESS_PROCESSED", "APPROVED"],
-    // Cobro rechazado por el emisor o la terminal.
-    //
-    // BLOCKED está acá y no en una rama de fraude: Nave lo define como "intención bloqueada por
-    // fraude o intentos excedidos", y el caso corriente es el segundo. Una tarjeta sin fondos deja
-    // la intención en BLOCKED por los intentos excedidos. Tratarlo como bloqueo de seguridad
-    // mandaba al cajero a llamar a Nave con el cliente esperando, por una tarjeta sin saldo.
-    //
-    // Lo que distingue un fraude es el motivo del pago (fraud_identification, risky_payment,
-    // fraud_suspected), y ese motivo llega resuelto en `nave_reason`.
-    FAILURE: ["FAILURE_PROCESSED", "REJECTED", "BLOCKED"],
-    // Intención dada de baja: cancelada en la terminal, vencida, o porque Nave no pudo avisarle al
-    // equipo. Si Nave informa cuál fue, llega resuelto en `nave_reason`.
-    DISABLED: ["DISABLED", "CANCELLED"],
-    // La intención superó su duration_time sin cobrarse
-    EXPIRED: ["EXPIRED"],
-    // Todavía en curso: seguimos consultando
-    IN_PROGRESS: ["PENDING", "PROCESSED", "PROCESSING"],
-};
+// Los estados de Nave se clasifican en el backend (`nave_outcome`): de esa clasificación depende dar
+// una venta por cobrada, y en el navegador no hay cómo probarla. Ver NAVE_OUTCOME_BY_STATUS en
+// pos_nave/models/pos_payment_method.py.
 
 /**
  * Interfaz de Pagos POS para Terminales Smart POS de Nave.
@@ -57,10 +32,8 @@ export class PaymentNave extends PaymentInterface {
         this.pollGraceMinMs = 10000;
         // Cuántos fallos de transporte seguidos toleramos antes de cortar.
         this.maxTransportErrors = 3;
-        this.pollingTimeout = null;
-        this.pollDeadline = 0;
-        this.transportErrors = 0;
-        this.isPolling = false;
+        // El cobro en curso. Ver _await_outcome.
+        this.charge = null;
     }
 
     /**
@@ -118,10 +91,9 @@ export class PaymentNave extends PaymentInterface {
                 // pide DELETE /api/payments/{payment_id} para devolver. Pendiente de resolver.
                 line.transaction_id = data.id;
                 line.set_payment_status("waitingCard");
-                this.isPolling = true;
-                this.transportErrors = 0;
-                this.pollDeadline = Date.now() + this._poll_timeout_ms(data.nave_duration_seconds);
-                return await this._poll_payment_status(line, payment_method_id, data.id);
+                return await this._await_outcome(
+                    line, payment_method_id, data.id, data.nave_duration_seconds
+                );
             } else {
                 this._showError(_t("Respuesta inválida de Nave. Faltan datos."), _t("Error"));
                 line.set_payment_status("retry");
@@ -167,128 +139,294 @@ export class PaymentNave extends PaymentInterface {
     }
 
     /**
-     * Bucle de Polling: consulta la intención hasta llegar a un estado terminal, agotar el
-     * tiempo de la intención, o perder la conexión. Nunca gira indefinidamente.
+     * Espera el desenlace del cobro que se acaba de enviar a la terminal.
+     *
+     * Devuelve una promesa que el core espera para fijar el estado de la línea (`line.pay()`):
+     * `true` la da por cobrada y `false` la deja reintentable. La promesa se resuelve una sola vez,
+     * con el primero que llegue a un desenlace —el polling, la cancelación o "Forzar terminación"—,
+     * y cualquier respuesta posterior sobre el mismo cobro se descarta. Sin esa regla, una
+     * respuesta tardía podía pisar el desenlace: es lo que devolvió a reintentable la línea que el
+     * cajero había forzado en C9.
      */
-    async _poll_payment_status(line, payment_method_id, intent_id) {
-        if (!this.isPolling) {
-            line.set_payment_status("retry");
-            return false;
+    _await_outcome(line, payment_method_id, intent_id, durationSeconds) {
+        this._abandon_charge();
+        return new Promise((resolve) => {
+            this.charge = {
+                line,
+                paymentMethodId: payment_method_id,
+                intentId: intent_id,
+                deadline: Date.now() + this._poll_timeout_ms(durationSeconds),
+                transportErrors: 0,
+                timer: null,
+                settled: false,
+                resolve,
+            };
+            this._poll(this.charge);
+        });
+    }
+
+    /**
+     * Una vuelta del polling. Nunca gira indefinidamente: corta al vencer el plazo de la intención,
+     * al perder la conexión o ante un error.
+     */
+    async _poll(charge) {
+        if (charge.settled) {
+            return;
         }
 
         // Tope de espera: pasado el duration_time, la intención ya no es cobrable.
-        if (Date.now() > this.pollDeadline) {
-            this._stop_polling();
-            this._showError(
-                _t("Se agotó el tiempo de espera del cobro. Verificá el estado en la terminal antes de reintentar."),
-                _t("Tiempo agotado")
-            );
-            line.set_payment_status("retry");
-            return false;
+        if (Date.now() > charge.deadline) {
+            if (this._settle(charge, false)) {
+                this._showError(
+                    _t("Se agotó el tiempo de espera del cobro. Verificá el estado en la terminal antes de reintentar."),
+                    _t("Tiempo agotado")
+                );
+            }
+            return;
         }
 
+        let data;
         try {
-            const data = await this.pos.data.silentCall(
-                "pos.payment.method",
-                "nave_check_payment_status",
-                [[payment_method_id], intent_id]
-            );
+            data = await this._query_status(charge.paymentMethodId, charge.intentId);
+        } catch (error) {
+            // Red de seguridad: ante cualquier error inesperado cortamos en vez de dejar la
+            // pantalla colgada.
+            console.error("[pos_nave] Error inesperado durante el polling:", error);
+            if (this._settle(charge, false)) {
+                this._showError(String(error.message || error), _t("Error inesperado"));
+            }
+            return;
+        }
 
-            // silentCall devuelve false ante cualquier excepción del servidor. Toleramos algunos
-            // fallos seguidos (un corte breve de red) antes de darnos por vencidos.
-            if (!data) {
-                this.transportErrors += 1;
-                if (this.transportErrors >= this.maxTransportErrors) {
-                    this._stop_polling();
+        // Mientras esperábamos la respuesta, el cobro pudo resolverse por otro lado.
+        if (charge.settled) {
+            return;
+        }
+
+        // silentCall devuelve false ante cualquier excepción del servidor. Toleramos algunos
+        // fallos seguidos (un corte breve de red) antes de darnos por vencidos.
+        if (!data) {
+            charge.transportErrors += 1;
+            if (charge.transportErrors >= this.maxTransportErrors) {
+                if (this._settle(charge, false)) {
                     this._showError(
                         _t("Se perdió la conexión con el servidor mientras se consultaba el cobro. Verificá el estado en la terminal antes de reintentar."),
                         _t("Desconexión")
                     );
-                    line.set_payment_status("retry");
-                    return false;
                 }
-                return await this._schedule_next_poll(line, payment_method_id, intent_id);
+                return;
             }
+            this._schedule_next_poll(charge);
+            return;
+        }
 
-            if (data.error) {
-                this._stop_polling();
+        if (data.error) {
+            if (this._settle(charge, false)) {
                 this._showError(data.message, _t("Error consultando estado en Nave"));
-                line.set_payment_status("retry");
-                return false;
             }
+            return;
+        }
 
-            this.transportErrors = 0;
-            const statusName = String(data?.status?.name || "").toUpperCase();
+        charge.transportErrors = 0;
+        if (!this._finish(charge, data)) {
+            this._schedule_next_poll(charge);
+        }
+    }
 
-            if (NAVE_STATUS.SUCCESS.includes(statusName)) {
-                this._stop_polling();
-                this._apply_payment_details(line, data, intent_id);
-                line.set_payment_status("done");
-                return true;
+    _query_status(payment_method_id, intent_id) {
+        return this.pos.data.silentCall(
+            "pos.payment.method",
+            "nave_check_payment_status",
+            [[payment_method_id], intent_id]
+        );
+    }
+
+    /**
+     * Termina el cobro si Nave ya informó un desenlace. Devuelve false si todavía hay que esperar.
+     */
+    _finish(charge, data) {
+        if (charge.settled) {
+            return true;
+        }
+        if (data.nave_outcome === "approved") {
+            this._apply_payment_details(charge.line, data, charge.intentId);
+            this._settle(charge, true);
+            return true;
+        }
+        const notice = this._final_notice(data, charge.intentId);
+        if (notice) {
+            if (this._settle(charge, false)) {
+                this._showError(notice.body, notice.title);
             }
+            return true;
+        }
+        if (data.nave_outcome === "unknown") {
+            // El backend ya lo registró. Seguimos esperando en vez de cortar un cobro que podría
+            // estar en curso, y nunca lo damos por cobrado.
+            console.warn("[pos_nave] Estado no contemplado devuelto por Nave:", data?.status?.name, data);
+        }
+        return false;
+    }
 
-            if (NAVE_STATUS.FAILURE.includes(statusName)) {
-                this._stop_polling();
-                this._showError(
-                    this._outcome_notice(
-                        data,
-                        intent_id,
+    /**
+     * El aviso de un cobro que terminó sin cobrarse, o null si el cobro no terminó o salió bien.
+     */
+    _final_notice(data, intent_id) {
+        switch (data.nave_outcome) {
+            case "rejected":
+                return {
+                    title: _t("Pago rechazado"),
+                    body: this._outcome_notice(
+                        data, intent_id,
                         _t("El pago fue rechazado."),
                         _t("Podés reintentar o cobrar con otro medio.")
                     ),
-                    _t("Pago rechazado")
-                );
-                line.set_payment_status("retry");
-                return false;
-            }
-
-            if (NAVE_STATUS.DISABLED.includes(statusName)) {
-                this._stop_polling();
-                this._showError(
-                    this._outcome_notice(
-                        data,
-                        intent_id,
+                };
+            case "disabled":
+                return {
+                    title: _t("Cobro dado de baja"),
+                    body: this._outcome_notice(
+                        data, intent_id,
                         _t("El cobro ya no está disponible."),
                         _t("Generá un cobro nuevo.")
                     ),
-                    _t("Cobro dado de baja")
-                );
-                line.set_payment_status("retry");
-                return false;
-            }
-
-            if (NAVE_STATUS.EXPIRED.includes(statusName)) {
-                this._stop_polling();
-                this._showError(
-                    this._outcome_notice(
-                        data,
-                        intent_id,
+                };
+            case "expired":
+                return {
+                    title: _t("Cobro expirado"),
+                    body: this._outcome_notice(
+                        data, intent_id,
                         _t("La intención de cobro expiró sin recibir el pago."),
                         _t("Generá un cobro nuevo.")
                     ),
-                    _t("Cobro expirado")
-                );
-                line.set_payment_status("retry");
-                return false;
-            }
+                };
+            default:
+                return null;
+        }
+    }
 
-            if (!NAVE_STATUS.IN_PROGRESS.includes(statusName)) {
-                // Estado no contemplado: lo dejamos registrado para poder mapearlo después, pero
-                // seguimos esperando en vez de cortar un cobro que podría estar en curso.
-                console.warn("[pos_nave] Estado no contemplado devuelto por Nave:", statusName, data);
-            }
-
-            return await this._schedule_next_poll(line, payment_method_id, intent_id);
-
-        } catch (error) {
-            // Red de seguridad: ante cualquier error inesperado cortamos el bucle en vez de
-            // dejarlo vivo con la pantalla colgada.
-            console.error("[pos_nave] Error inesperado durante el polling:", error);
-            this._stop_polling();
-            this._showError(String(error.message || error), _t("Error inesperado"));
-            line.set_payment_status("retry");
+    /**
+     * Resuelve el cobro una sola vez. Devuelve false si ya estaba resuelto, para que quien llegue
+     * tarde no muestre un segundo aviso.
+     */
+    _settle(charge, isPaymentSuccessful) {
+        if (!charge || charge.settled) {
             return false;
         }
+        charge.settled = true;
+        clearTimeout(charge.timer);
+        if (this.charge === charge) {
+            this.charge = null;
+        }
+        if (!isPaymentSuccessful) {
+            charge.line.set_payment_status("retry");
+        }
+        charge.resolve(isPaymentSuccessful);
+        return true;
+    }
+
+    /**
+     * Deja de consultar sin resolver el cobro. La línea queda como estaba; si después se fuerza la
+     * terminación, se consulta a Nave igual (ver force_done).
+     */
+    _abandon_charge() {
+        if (this.charge) {
+            this.charge.settled = true;
+            clearTimeout(this.charge.timer);
+            this.charge = null;
+        }
+    }
+
+    /**
+     * "Forzar terminación" sobre una línea de Nave: decide lo que diga Nave, no el botón.
+     *
+     * El botón del core da la línea por cobrada sin preguntarle nada al medio de pago. Está pensado
+     * para terminales locales que pierden la conexión; con Nave el estado siempre se puede
+     * consultar. En C9, tocarlo mientras la terminal esperaba la tarjeta dejó una venta validable
+     * sin cobro.
+     *
+     * Devuelve true sólo si hay que seguir con el comportamiento del core, que es marcar la línea y
+     * validar la venta. Con un cobro en curso nunca hace falta: se lo resuelve con el desenlace, y
+     * el cobro aprobado sigue el mismo camino que uno detectado por el polling.
+     */
+    async force_done(line) {
+        if (line.get_payment_status() === "waiting") {
+            this._showError(
+                _t("El cobro todavía se está enviando a la terminal. Esperá a que la terminal pida la tarjeta."),
+                _t("El cobro se está enviando")
+            );
+            return false;
+        }
+
+        const charge = this.charge && this.charge.line === line ? this.charge : null;
+        const intent_id = charge ? charge.intentId : line.transaction_id;
+        const payment_method_id = this.payment_method_id.id;
+
+        let data = false;
+        if (intent_id) {
+            try {
+                data = await this._query_status(payment_method_id, intent_id);
+            } catch (error) {
+                console.error("[pos_nave] No se pudo consultar a Nave al forzar la terminación:", error);
+                data = false;
+            }
+        }
+        if (charge?.settled) {
+            // El polling llegó primero mientras consultábamos.
+            return false;
+        }
+
+        if (!data || data.error) {
+            const confirmed = await ask(this.env.services.dialog, {
+                title: _t("No se pudo consultar a Nave"),
+                body: _t(
+                    "Odoo no pudo confirmar el cobro con Nave. Marcalo como cobrado sólo si viste la " +
+                    "aprobación en la terminal o en el cupón."
+                ),
+                confirmLabel: _t("Vi la aprobación"),
+                cancelLabel: _t("Volver"),
+            });
+            if (!confirmed) {
+                return false;
+            }
+            if (charge) {
+                this._settle(charge, true);
+                return false;
+            }
+            return true;
+        }
+
+        if (charge) {
+            if (!this._finish(charge, data)) {
+                this._show_still_waiting(data, intent_id);
+            }
+            return false;
+        }
+
+        // Sin un cobro en curso en esta pantalla, por ejemplo después de recargar el POS.
+        if (data.nave_outcome === "approved") {
+            this._apply_payment_details(line, data, intent_id);
+            return true;
+        }
+        const notice = this._final_notice(data, intent_id);
+        if (notice) {
+            line.set_payment_status("retry");
+            this._showError(notice.body, notice.title);
+            return false;
+        }
+        this._show_still_waiting(data, intent_id);
+        return false;
+    }
+
+    _show_still_waiting(data, intent_id) {
+        this._showError(
+            this._outcome_notice(
+                data, intent_id,
+                _t("La terminal todavía está esperando la tarjeta y Nave no confirmó ningún cobro."),
+                _t("Podés esperar o cancelar el cobro.")
+            ),
+            _t("El cobro sigue en curso")
+        );
     }
 
     /**
@@ -359,12 +497,8 @@ export class PaymentNave extends PaymentInterface {
     /**
      * Agenda la próxima consulta respetando el intervalo de polling.
      */
-    _schedule_next_poll(line, payment_method_id, intent_id) {
-        return new Promise((resolve) => {
-            this.pollingTimeout = setTimeout(async () => {
-                resolve(await this._poll_payment_status(line, payment_method_id, intent_id));
-            }, this.pollInterval);
-        });
+    _schedule_next_poll(charge) {
+        charge.timer = setTimeout(() => this._poll(charge), this.pollInterval);
     }
 
     /**
@@ -408,22 +542,11 @@ export class PaymentNave extends PaymentInterface {
     }
 
     /**
-     * Corta el bucle y limpia el temporizador pendiente.
-     */
-    _stop_polling() {
-        this.isPolling = false;
-        if (this.pollingTimeout) {
-            clearTimeout(this.pollingTimeout);
-            this.pollingTimeout = null;
-        }
-    }
-
-    /**
      * Se llama al salir de la pantalla de pago. Sin esto el temporizador seguía vivo
      * consultando a Nave después de que el cajero abandonó la pantalla.
      */
     close() {
-        this._stop_polling();
+        this._abandon_charge();
         super.close(...arguments);
     }
 
@@ -435,8 +558,10 @@ export class PaymentNave extends PaymentInterface {
         const line = this.pos.get_order().get_selected_paymentline();
         const payment_method_id = this.payment_method_id.id;
 
-        // Detener polling localmente
-        this._stop_polling();
+        // El cobro termina acá: lo que responda Nave después sobre esta intención ya no cuenta.
+        if (this.charge && this.charge.line === line) {
+            this._settle(this.charge, false);
+        }
 
         if (!line.transaction_id) {
             line.set_payment_status("retry");

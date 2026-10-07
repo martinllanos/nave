@@ -195,6 +195,7 @@ class TestPosNavePayment(TransactionCase):
         self.assertEqual(res['status']['name'], 'SUCCESS_PROCESSED')
         self.assertEqual(res['nave_payment_id'], 'pay-9999')
         self.assertEqual(res['nave_payment']['payment_method']['card_last4'], '0011')
+        self.assertEqual(res['nave_outcome'], 'approved')
 
         # El segundo GET va al recurso de pago, con el payment_id y no con el de la intención.
         self.assertEqual(
@@ -535,6 +536,7 @@ class TestPosNavePayment(TransactionCase):
         self.assertNotIn('reason_code', res['status'])
         self.assertNotIn('reason_name', res['status'])
         self.assertNotIn('nave_reason', res, "Sin motivo en el cuerpo, no se afirma ninguna causa")
+        self.assertEqual(res['nave_outcome'], 'disabled')
 
     @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.get')
     def test_27_other_400s_are_still_errors(self, mock_get):
@@ -583,28 +585,49 @@ class TestPosNavePayment(TransactionCase):
             "El plazo que se informa debe ser el mismo que se le pidió a Nave",
         )
 
-    def test_31_blocked_is_treated_as_a_rejection(self):
-        """`BLOCKED` tiene que leerse como un rechazo, no como un bloqueo de seguridad.
+    @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.get')
+    def test_31_each_status_has_its_outcome(self, mock_get):
+        """La clasificación decide si una venta queda cobrada, así que se prueba estado por estado.
 
-        Nave lo define como "intención bloqueada por fraude o intentos excedidos", y el caso
-        frecuente es el segundo: una tarjeta sin fondos. Lo que distingue un fraude es el motivo del
-        pago, que el backend resuelve y tiene sus propios tests.
-
-        La clasificación de estados vive en el navegador y el módulo no tiene infraestructura de
-        tests de JavaScript, así que esto vigila el fuente. Se limita a la clasificación a
-        propósito: los textos del aviso salen del catálogo y de la resolución del backend, que se
-        prueban por su comportamiento.
+        `BLOCKED` es un rechazo y no un bloqueo de seguridad: Nave lo define como "fraude o intentos
+        excedidos", y una tarjeta sin fondos lo produce al agotar los intentos.
         """
-        import pathlib
-        js = (pathlib.Path(__file__).parent.parent / 'static' / 'src' / 'app' / 'payment_nave.js').read_text()
+        esperado = {
+            'SUCCESS_PROCESSED': 'approved',
+            'APPROVED': 'approved',
+            'FAILURE_PROCESSED': 'rejected',
+            'REJECTED': 'rejected',
+            'BLOCKED': 'rejected',
+            'DISABLED': 'disabled',
+            'CANCELLED': 'disabled',
+            'EXPIRED': 'expired',
+            'PENDING': 'pending',
+            'PROCESSED': 'pending',
+            'PROCESSING': 'pending',
+        }
+        for status, outcome in esperado.items():
+            with self.subTest(status=status):
+                mock_get.side_effect = None
+                mock_get.return_value = _mock_response({'id': 'intent-x', 'status': {'name': status}})
+                res = self.pos_payment_method.nave_check_payment_status(
+                    self.pos_payment_method.id, intent_id='intent-x'
+                )
+                self.assertEqual(res['nave_outcome'], outcome)
 
-        catalogo = js.split('const NAVE_STATUS', 1)[1].split('};', 1)[0]
-        linea_rechazo = next(linea for linea in catalogo.splitlines()
-                             if linea.strip().startswith('FAILURE:'))
-        self.assertIn('BLOCKED', linea_rechazo,
-                      "BLOCKED debe estar clasificado junto a los rechazos")
-        self.assertNotIn('BLOCKED:', catalogo,
-                         "No debe quedar una rama propia de bloqueo por seguridad")
+    @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.get')
+    def test_31b_an_unknown_status_is_never_a_charge(self, mock_get):
+        """Un estado que el módulo no conoce se trata como espera y queda registrado para agregarlo."""
+        mock_get.return_value = _mock_response({'id': 'intent-raro', 'status': {'name': 'ALGO_NUEVO'}})
+
+        with self.assertLogs(POS_LOGGER, level='WARNING') as logs:
+            res = self.pos_payment_method.nave_check_payment_status(
+                self.pos_payment_method.id, intent_id='intent-raro'
+            )
+
+        self.assertEqual(res['nave_outcome'], 'unknown')
+        registro = next(line for line in logs.output if 'no contemplado' in line)
+        self.assertIn('ALGO_NUEVO', registro)
+        self.assertIn('intent-raro', registro)
 
     # ──────────────────────────────────────────────
     # MOTIVO DEL DESENLACE

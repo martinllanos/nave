@@ -24,9 +24,38 @@ NAVE_TIMEOUTS = {
     'refund': 15,
 }
 
-# Estados de la intención en los que el cobro ya terminó, salga bien o mal. Al llegar a uno de
-# ellos el POS deja de consultar, así que es el momento de dejar registrado el desenlace.
-NAVE_INTENT_FINAL_STATUSES = {'SUCCESS_PROCESSED', 'FAILURE_PROCESSED', 'BLOCKED', 'DISABLED', 'EXPIRED'}
+# Desenlace de un cobro según el estado que informa Nave.
+#
+# La consulta devuelve el estado de la INTENCIÓN (SUCCESS_PROCESSED, BLOCKED, …), que no es el mismo
+# vocabulario que el del PAGO (APPROVED, REJECTED, …). Se aceptan los dos por si el endpoint
+# devolviera el del pago.
+#
+# Se clasifica acá y no en el navegador porque de esta clasificación depende dar una venta por
+# cobrada, también cuando el cajero fuerza la terminación, y eso tiene que poder probarse. Un
+# estado que no está en la tabla es 'unknown': el POS lo trata como una espera, nunca como un cobro.
+#
+# BLOCKED es un rechazo y no un bloqueo de seguridad: Nave lo define como "intención bloqueada por
+# fraude o intentos excedidos", y el caso corriente es una tarjeta sin fondos que agotó los
+# intentos. Un fraude se distingue por el motivo del pago (`nave_reason`), no por este estado.
+NAVE_OUTCOME_BY_STATUS = {
+    'SUCCESS_PROCESSED': 'approved',
+    'APPROVED': 'approved',
+    'FAILURE_PROCESSED': 'rejected',
+    'REJECTED': 'rejected',
+    'BLOCKED': 'rejected',
+    # Cancelada en la terminal, vencida por el tope propio de la terminal, o porque Nave no pudo
+    # avisarle al equipo.
+    'DISABLED': 'disabled',
+    'CANCELLED': 'disabled',
+    'EXPIRED': 'expired',
+    'PENDING': 'pending',
+    'PROCESSED': 'pending',
+    'PROCESSING': 'pending',
+}
+
+# Desenlaces en los que el cobro ya terminó, salga bien o mal. Al llegar a uno de ellos el POS deja
+# de consultar, así que es el momento de dejar registrado el desenlace.
+NAVE_FINAL_OUTCOMES = {'approved', 'rejected', 'disabled', 'expired'}
 
 # Cuánto vale una intención de cobro presencial, en segundos. Cinco minutos es holgado con el
 # cliente parado frente a la caja, y es la cota de cuánto puede quedar la terminal esperando.
@@ -218,6 +247,7 @@ class PosPaymentMethod(models.Model):
                 payment = self._nave_fetch_payment(provider, payment_id, payment_type)
                 if payment:
                     data['nave_payment'] = payment
+            data['nave_outcome'] = self._nave_outcome(intent_id, data)
             reason = self._nave_resolve_reason(data)
             if reason:
                 data['nave_reason'] = reason
@@ -241,6 +271,7 @@ class PosPaymentMethod(models.Model):
                 data = {
                     'id': intent_id,
                     'status': {'name': 'DISABLED'},
+                    'nave_outcome': 'disabled',
                 }
                 reason = self._nave_disabled_reason(self._nave_error_payload(e))
                 if reason:
@@ -373,6 +404,19 @@ class PosPaymentMethod(models.Model):
         code = self._nave_disabled_reason_code(payload)
         return self._nave_reason(code, 'intent') if code else False
 
+    def _nave_outcome(self, intent_id, data):
+        """ Desenlace del cobro según el estado de la intención. Ver NAVE_OUTCOME_BY_STATUS. """
+        status = str((data.get('status') or {}).get('name') or '').upper()
+        outcome = NAVE_OUTCOME_BY_STATUS.get(status, 'unknown')
+        if outcome == 'unknown':
+            # Se registra para poder agregarlo a la tabla. Mientras tanto el POS sigue esperando y
+            # no da nada por cobrado.
+            _logger.warning(
+                "[pos_nave] Nave informó un estado no contemplado para la intención %s: %r",
+                intent_id, status,
+            )
+        return outcome
+
     def _nave_log_outcome(self, intent_id, data):
         """ Registra el desenlace de un cobro que llegó a un estado final.
 
@@ -380,9 +424,9 @@ class PosPaymentMethod(models.Model):
         cobro rechazado no deja ningún registro en Odoo. Lleva lo que pide la soporte para buscarlo
         del lado de Nave.
         """
-        status = str((data.get('status') or {}).get('name') or '').upper()
-        if status not in NAVE_INTENT_FINAL_STATUSES:
+        if data.get('nave_outcome') not in NAVE_FINAL_OUTCOMES:
             return
+        status = str((data.get('status') or {}).get('name') or '').upper()
         reason = data.get('nave_reason') or {}
         _logger.info(
             "[pos_nave] Cobro %s terminado en %s. Intención: %s. Pago: %s. Motivo: %s (%s).",
