@@ -458,6 +458,43 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.36 🔴 C4: cancelar desde Odoo nunca funcionó (2026-10-07)
+
+Prueba A: cobro de $246,90 a la terminal y, sin tocar el equipo, *Cancelar* en Odoo. Evidencia en
+`docs/homologacion/evidencias/C4/`.
+
+- Odoo mostró *"La terminal puede seguir cobrando"* con el mensaje de Nave: **`['Invalid input
+  reason'] (HTTP 400)`**.
+- La terminal siguió pidiendo la tarjeta: el cobro quedó vivo, y el cliente todavía podía pagarlo.
+
+**Causa: Nave valida el par código + descripción del motivo de baja, y la descripción tiene que
+ser un texto fijo.** Sondeado en sandbox con una intención inexistente: Nave valida el motivo antes
+de buscar la intención, así que un motivo aceptado devuelve 404 y uno rechazado, 400.
+
+| Código | Descripción aceptada | Rechazadas |
+|---|---|---|
+| `disabled_from_saas` | `disabled from SAAS` | `disabled from saas`, `Disabled from SAAS`, `disabled_from_saas`, el texto en castellano de la doc, `Cancelado desde Odoo POS` (la de Odoo) |
+| `manual_disabled_by_user` | `manual disabled by user` | `manual` |
+| `low_battery` | `low battery` | `Low battery`, `low_battery`, `x` |
+| `device_already_on_payment_flow` | `device already on payment flow` | |
+| `disabled_by_user_timeout` | `disabled by user timeout` | |
+| `not_specified` | — (rechazó `not specified`) | |
+
+Un cuerpo vacío (`{}`) o ausente también pasa la validación. Sólo `code`, sólo `description` o
+`reason` vacío se rechazan.
+
+**La documentación no lo dice:** describe `reason.description` como un texto que *"brinda
+información sobre el código de baja"*, y lista `disabled_from_saas` como código válido sin aclarar
+que su descripción es fija. El módulo manda el código correcto con una descripción libre, así que
+**todas** las cancelaciones desde Odoo fueron rechazadas desde siempre. En sandbox la baja sí había
+respondido 200 alguna vez; no consta con qué cuerpo.
+
+**Además:** la cancelación registra en el log sólo el código HTTP, no el cuerpo de la respuesta. Lo
+que se supo, se supo porque el aviso al cajero sí muestra el mensaje de Nave.
+
+Las pruebas B y C (cancelar con el cliente operando en la terminal, y después de *volver* en el
+equipo) se postergan hasta corregir el cuerpo: hoy fallarían igual, por el mismo motivo.
+
 ### 3.35 Reprueba de C8: un corte ya no lleva a cobrar dos veces (2026-10-07)
 
 Corrección en `survive-network-cuts-without-charging-twice`, `pos_nave 18.0.1.11.0`. Un corte de red
@@ -1851,7 +1888,7 @@ deciden cómo se escribe el fix de B11.
 | C1 | Contrato de estados 🔴 | Cobrar y capturar la respuesta cruda de `GET /api/payment_requests/{id}` | Documentar la forma exacta de `status` y el catálogo completo de valores. **Todo el polling depende de una suposición del código** (`payment_nave.js:124`: *"suponiendo estructura {status:{name:...}}"*) | ✅ 2026-10-05: forma capturada en §3.20. La suposición es correcta en la intención, pero **no** dentro de `payment_attempts` |
 | C2 | Cobro aprobado con chip | Orden POS → Tarjeta → insertar chip → aprobar | Línea `done`, orden validada, `transaction_id` guardado |✅ 2026-10-06, POS 1/0001: línea cobrada, orden facturada (`FA-C 00001-00000004`) y `transaction_id` guardado. Se pagó por **NFC**, no por chip. §3.27 |
 | C3 | Cobro rechazado | Tarjeta de rechazo en la terminal | Diálogo con el `reason_code`, línea en `retry`, el cajero puede reintentar |🔴 2026-10-07: la línea queda reintentable y no se contabiliza nada, pero Nave devuelve `BLOCKED` y el cajero lee *"Nave bloqueó la operación por motivos de seguridad. Contactá a Nave antes de reintentar"* por una tarjeta sin fondos. §3.30. ⚠️ Reprueba con 18.0.1.8.0: ya no hay alarma de seguridad, pero el aviso muestra el motivo de la intención (*"payment retries limit reached"*) en vez del de la tarjeta. ✅ Reprueba con 18.0.1.9.0: *"La tarjeta no tiene fondos suficientes. Podés reintentar o cobrar con otro medio."*, con el código sólo en el bloque de soporte. §3.31 |
-| C4 | Cancelación desde Odoo | Iniciar cobro → botón Cancel | `DELETE` a Nave y la **terminal vuelve a reposo**. Ojo: `send_payment_cancel` retorna `true` siempre, incluso si el DELETE falló (`payment_nave.js:185-190`) | ⬜ |
+| C4 | Cancelación desde Odoo | Iniciar cobro → botón Cancel | `DELETE` a Nave y la **terminal vuelve a reposo**. Ojo: `send_payment_cancel` retorna `true` siempre, incluso si el DELETE falló (`payment_nave.js:185-190`) | 🔴 2026-10-07: Nave rechaza toda baja desde Odoo con `400 Invalid input reason`: exige una descripción fija por código (`disabled from SAAS`) y Odoo manda una libre. La terminal sigue cobrando. §3.36 |
 | C5 | Cancelación desde la terminal | Iniciar cobro → cancelar en el equipo | Nave notifica `DISABLED` con `manual_disabled_by_user`. **Se espera loop infinito** (B4) |⚠️ 2026-10-07: la terminal vuelve a reposo ("Ingresá el monto a cobrar") y el POS cierra la línea como reintentable. Pero el motivo que se le muestra al cajero es el mismo código que en C6, así que **no se distingue una cancelación de un vencimiento**. §3.29. ✅ Reprueba con 18.0.1.9.0: *"El cobro ya no está disponible. Generá un cobro nuevo."*, sin código en la explicación. Nave no informa el motivo de la baja en el 400. §3.31 |
 | C6 | Expiración de la intención | Iniciar cobro y no tocar nada 300 s | Nave marca `EXPIRED`. **Se espera loop infinito** (B4) |⚠️ 2026-10-07: **no hay loop infinito**. Nave no manda `EXPIRED` sino `DISABLED` con `payment_request_is_disabled`: la terminal da de baja la intención. La línea queda reintentable y no se contabiliza nada, pero el cajero lee el código crudo. §3.28. ✅ Reprueba con 18.0.1.9.0: esta vez Nave respondió `EXPIRED` a los 303 s y el cajero leyó *"Cobro expirado"*. Un vencimiento llega a veces como `EXPIRED` y a veces como baja; el aviso es correcto en los dos casos. §3.31 |
 | C7 | Salir de la pantalla de pago | Iniciar cobro → botón Back | La intención queda viva: **la terminal sigue cobrable**. No hay `close()` implementado | ⬜ |

@@ -139,6 +139,21 @@ Se informan en `reason.code` y `reason.description`:
 La misma página trae una versión más corta de esta tabla que omite `disabled_by_user_timeout` y
 `not_specified`. Esta es la completa.
 
+**Para dar de baja una intención (`DELETE /api/payment_requests/{id}`), la descripción no es libre.**
+Verificado contra la API el 2026-10-07: Nave exige un texto fijo por código, en inglés y con esas
+mayúsculas, y responde `400 {"code":"validation_exception","message":["Invalid input reason"]}`
+con cualquier otro. La documentación no lo menciona.
+
+| `reason.code` | `reason.description` aceptada |
+|---|---|
+| `disabled_from_saas` | `disabled from SAAS` |
+| `manual_disabled_by_user` | `manual disabled by user` |
+| `low_battery` | `low battery` |
+| `device_already_on_payment_flow` | `device already on payment flow` |
+| `disabled_by_user_timeout` | `disabled by user timeout` |
+
+`not_specified` no fue aceptado con `not specified`. Un cuerpo vacío también pasa la validación.
+
 **Esto contradice un supuesto del módulo.** El POS da por hecho que desde Odoo no se puede
 distinguir una cancelación en la terminal de un vencimiento o de una falla de notificación, y Nave
 informa justamente esa diferencia. Lo que no está verificado es si llega a Odoo: cuando la

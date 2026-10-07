@@ -214,6 +214,24 @@ Conviene verlo con la pantalla abierta. El detalle está en
 
 ---
 
+## 8c. La descripción del motivo de baja tiene que ser un texto fijo
+
+**Qué pasa.** `DELETE /api/payment_requests/{id}` rechaza con `400 Invalid input reason` cualquier
+`reason.description` que no sea un texto fijo por código: `disabled_from_saas` sólo pasa con
+`disabled from SAAS`, exacto. La documentación la presenta como texto libre. Por eso ninguna
+cancelación desde Odoo funcionó hasta ahora (`plan_homologacion_nave.md` §3.36).
+
+**Preguntas:**
+
+1. ¿Cuál es la lista oficial de pares código + descripción? `not_specified` no pasó con
+   `not specified`.
+2. ¿Pueden documentarlo, o aceptar una descripción libre como dice la documentación?
+3. ¿Qué motivo corresponde a una baja pedida por el sistema del comercio? Usamos `disabled_from_saas`.
+
+- Respuesta:
+
+---
+
 ## 9. Observaciones menores para ellos
 
 - **Cupón de rechazo con datos inconsistentes.** El cupón de la prueba C3 dice *"VISA CREDIT 3370"*
