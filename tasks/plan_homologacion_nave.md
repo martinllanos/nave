@@ -458,6 +458,37 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.34 🔴 C8: un corte de red puede hacer que el cliente pague dos veces (2026-10-07)
+
+Tres corridas con la terminal y `pos_nave 18.0.1.10.2`, dos de ellas con pago real. Evidencia en
+`docs/homologacion/evidencias/C8/`, una carpeta por corrida.
+
+| Corrida | Cómo se cortó la red | Qué hizo el POS | Desenlace |
+|---|---|---|---|
+| 1 — $123,45 | Corte de unos 2 min mientras el cliente pagaba | Siguió en *"Esperando la tarjeta"*, sin aviso | Al volver la red, la consulta trajo la aprobación: *"Pago exitoso"* ✅ |
+| 2 — $150 | Cable de red desenchufado unos 3 min, sin pagar | Siguió en *"Esperando la tarjeta"*, sin aviso, pasado el plazo | La terminal se rindió (*"Se cumplió el tiempo para pagar"*); al reconectar, *"Cobro dado de baja"* |
+| 3 — $150 | Navegador sin conexión (*Archivo › Trabajar sin conexión*) | A los ~9 s, *"Desconexión"* y línea en *"Volver a intentar"* | **Nave aprobó el pago 28 s después** (webhook de las 19:16:45 UTC). Odoo nunca se enteró: la línea sigue para reintentar 🔴 |
+
+**Dos defectos, según cómo falle la red:**
+
+1. **Si la consulta falla al instante (corrida 3), el POS da el cobro por fallido mientras la
+   terminal sigue cobrando.** El aviso dice *"Verificá el estado en la terminal antes de
+   reintentar"*, pero si el cajero ve la aprobación no tiene cómo registrarla: una línea en
+   *"Volver a intentar"* no muestra *Forzar terminación*. *Volver a intentar* crea un cobro nuevo y
+   el cliente paga dos veces; cobrar en efectivo tiene el mismo resultado. El pago aprobado no deja
+   rastro en Odoo: sólo el webhook, que `payment_nave` responde con 500 porque no lo reconoce (§3.31).
+2. **Si la consulta queda colgada (corridas 1 y 2), el POS espera sin límite y sin aviso,** aun
+   pasado el plazo de la intención: el tope sólo se revisa entre consultas, y una consulta colgada
+   no termina. Si la red vuelve, se entera del desenlace real, como en la corrida 1. Si no vuelve,
+   queda trabado, y *Forzar terminación* tampoco responde: su consulta a Nave se cuelga igual y la
+   pregunta al cajero nunca aparece.
+
+**Lo que esto confirma de la terminal:** el tope propio de unos 3 minutos (corrida 2, como en C9).
+
+**El pedido de la corrida 3 quedó abierto en el POS a propósito**, con la línea en *"Volver a
+intentar"* y el pago aprobado en Nave. Sirve para probar la corrección: reintentar tiene que
+encontrar el pago aprobado en lugar de crear otro cobro.
+
 ### 3.33 Reprueba de C9: "Forzar terminación" consulta a Nave (2026-10-07)
 
 Corrección en `confirm-force-done-with-nave`. En una línea de Nave, *Forzar terminación* consulta a
@@ -1802,7 +1833,7 @@ deciden cómo se escribe el fix de B11.
 | C5 | Cancelación desde la terminal | Iniciar cobro → cancelar en el equipo | Nave notifica `DISABLED` con `manual_disabled_by_user`. **Se espera loop infinito** (B4) |⚠️ 2026-10-07: la terminal vuelve a reposo ("Ingresá el monto a cobrar") y el POS cierra la línea como reintentable. Pero el motivo que se le muestra al cajero es el mismo código que en C6, así que **no se distingue una cancelación de un vencimiento**. §3.29. ✅ Reprueba con 18.0.1.9.0: *"El cobro ya no está disponible. Generá un cobro nuevo."*, sin código en la explicación. Nave no informa el motivo de la baja en el 400. §3.31 |
 | C6 | Expiración de la intención | Iniciar cobro y no tocar nada 300 s | Nave marca `EXPIRED`. **Se espera loop infinito** (B4) |⚠️ 2026-10-07: **no hay loop infinito**. Nave no manda `EXPIRED` sino `DISABLED` con `payment_request_is_disabled`: la terminal da de baja la intención. La línea queda reintentable y no se contabiliza nada, pero el cajero lee el código crudo. §3.28. ✅ Reprueba con 18.0.1.9.0: esta vez Nave respondió `EXPIRED` a los 303 s y el cajero leyó *"Cobro expirado"*. Un vencimiento llega a veces como `EXPIRED` y a veces como baja; el aviso es correcto en los dos casos. §3.31 |
 | C7 | Salir de la pantalla de pago | Iniciar cobro → botón Back | La intención queda viva: **la terminal sigue cobrable**. No hay `close()` implementado | ⬜ |
-| C8 | Corte de red durante el polling 🔴 | Iniciar cobro y cortar la conexión de Odoo | **Se espera spinner infinito sin diálogo de error** (B4). Verificar que la única salida es "Force done" | ⬜ |
+| C8 | Corte de red durante el polling 🔴 | Iniciar cobro y cortar la conexión de Odoo | **Se espera spinner infinito sin diálogo de error** (B4). Verificar que la única salida es "Force done" | 🔴 2026-10-07: con un corte que falla al instante, el POS da el cobro por fallido a los ~9 s mientras la terminal sigue cobrando; Nave aprobó $150 y Odoo quedó en *"Volver a intentar"*, camino directo a un cobro doble. Con un corte que cuelga la consulta, el POS espera sin límite ni aviso. §3.34 |
 | C9 | "Force done" con pago rechazado | Rechazar en la terminal y presionar Force done | La venta se cierra como cobrada sin cobro real. **Hallazgo a documentar y mitigar** | 🔴 2026-10-07: después de un rechazo el botón no aparece, pero mientras se espera la tarjeta *Forzar terminación* deja la línea en *"Pago exitoso"* con *Validar* habilitado, sin cobro y con la terminal todavía cobrable. Unos 3 min después, la baja devuelve la línea a reintentable. §3.32. ✅ Reprueba con 18.0.1.10.1: el botón consulta a Nave; forzar mientras espera no da nada por cobrado, un rechazo da un solo aviso y sin conexión se pregunta al cajero sin que el polling le gane. Pendiente sólo el forzado sobre un cobro aprobado. §3.33 |
 | C10 | Terminal ocupada | Lanzar un cobro con otro en curso | `device_already_on_payment_flow` (`doc_point.md` §6). Verificar el mensaje al cajero | ⬜ |
 | C11 | Terminal con batería < 5% | Descargar la terminal | `low_battery`. Verificar manejo | ⬜ |
