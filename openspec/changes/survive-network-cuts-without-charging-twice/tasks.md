@@ -42,7 +42,7 @@
       pedido 104 conserva el identificador de la intención. Después reintentarlo. Verificar: la línea
       queda cobrada con los datos de la tarjeta de los $150 aprobados y no aparece un cobro nuevo en
       la terminal ni en el log.
-- [ ] 4.4 Repetir con la terminal la corrida 3 de C8 (navegador sin conexión, pago real) y la corrida
+- [x] 4.4 Repetir con la terminal la corrida 3 de C8 (navegador sin conexión, pago real) y la corrida
       2 (cable desenchufado, sin pagar). Verificar: en la 3 el punto de venta registra el pago al
       volver la conexión; en la 2 avisa la falta de conexión y termina al vencer el plazo, sin quedar
       colgado. Registrar los resultados en el plan de homologación como reprueba de C8.
