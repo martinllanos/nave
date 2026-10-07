@@ -492,7 +492,31 @@ parece una frase" partía de que Nave no publicaba su catálogo, y el supuesto e
 - Debajo del aviso aparece un bloque *"Para soporte"* con el código y los identificadores.
 - El servidor registra el desenlace de cada cobro.
 
-Pendiente de reprueba con la terminal.
+**Reprueba con `pos_nave 18.0.1.9.0` (2026-10-07):** los tres casos pasan. Evidencia en
+`docs/homologacion/evidencias/{C3,C5,C6}/reprueba_18.0.1.9.0/`.
+
+| Caso | Lo que informó Nave | Aviso al cajero | Registro en el servidor |
+|---|---|---|---|
+| C3 | Intención `BLOCKED`; pago `no_amount_available` | *"La tarjeta no tiene fondos suficientes. Podés reintentar o cobrar con otro medio."* + código, pago e intención para soporte | `terminado en BLOCKED … Motivo: no_amount_available (La tarjeta no tiene fondos suficientes.)` |
+| C5 | `400 payment_request_is_disabled`, a los 8 s | *"El cobro ya no está disponible. Generá un cobro nuevo."* + intención para soporte | `terminado en DISABLED … Motivo: -` |
+| C6 | `EXPIRED`, a los 303 s | *"La intención de cobro expiró sin recibir el pago. Generá un cobro nuevo."* + intención para soporte | `terminado en EXPIRED … Motivo: -` |
+
+En los tres casos la línea queda con *"Volver a intentar"* y no se contabiliza nada.
+
+**Nave no informa el motivo de una baja al consultar la intención.** El cuerpo completo del 400 de
+C5 fue `{"code":"payment_request_is_disabled","message":"Payment request is disabled"}`, sin
+`reason`. Así que `manual_disabled_by_user`, que Nave documenta, no llega por esta vía, y el aviso
+genérico es lo que corresponde. Queda una vía sin explorar: la notificación de intención, que según
+la documentación trae `disabled_reason`. En los logs sólo aparecen notificaciones de pagos. Es una
+pregunta para Nave.
+
+**Un vencimiento no siempre llega igual.** En la primera corrida de C6 (§3.28), Nave dio de baja la
+intención (`DISABLED`). En esta respondió `EXPIRED`, con la misma terminal y el mismo plazo. El
+módulo da un aviso correcto en los dos casos, porque ninguno afirma una causa que Nave no informó.
+
+**Detalle menor:** con una baja, la línea del log dice `Cobro -` porque Nave no devuelve la
+intención y el backend no conoce la referencia del pedido. El identificador de la intención alcanza
+para buscarla.
 
 **De paso, en el log del servidor:** cada cobro del POS dispara un webhook de pago hacia
 `/payment/nave/webhook`. `payment_nave` no lo encuentra entre sus `payment.transaction` y responde
@@ -1710,10 +1734,10 @@ deciden cómo se escribe el fix de B11.
 | C0 | Ruteo a la terminal correcta 🔴 | Lanzar un cobro con el `pos_id` actual | El cobro **aparece en la terminal `L40000978`**. Si no aparece, el `pos_id` es el de e-commerce (§3.5) y hay que pedirle a Nave el de la terminal |✅ 2026-10-06: el cobro apareció en la terminal **L40037644**, la del `pos_id` configurado. §3.27 |
 | C1 | Contrato de estados 🔴 | Cobrar y capturar la respuesta cruda de `GET /api/payment_requests/{id}` | Documentar la forma exacta de `status` y el catálogo completo de valores. **Todo el polling depende de una suposición del código** (`payment_nave.js:124`: *"suponiendo estructura {status:{name:...}}"*) | ✅ 2026-10-05: forma capturada en §3.20. La suposición es correcta en la intención, pero **no** dentro de `payment_attempts` |
 | C2 | Cobro aprobado con chip | Orden POS → Tarjeta → insertar chip → aprobar | Línea `done`, orden validada, `transaction_id` guardado |✅ 2026-10-06, POS 1/0001: línea cobrada, orden facturada (`FA-C 00001-00000004`) y `transaction_id` guardado. Se pagó por **NFC**, no por chip. §3.27 |
-| C3 | Cobro rechazado | Tarjeta de rechazo en la terminal | Diálogo con el `reason_code`, línea en `retry`, el cajero puede reintentar |🔴 2026-10-07: la línea queda reintentable y no se contabiliza nada, pero Nave devuelve `BLOCKED` y el cajero lee *"Nave bloqueó la operación por motivos de seguridad. Contactá a Nave antes de reintentar"* por una tarjeta sin fondos. §3.30. ⚠️ Reprueba con 18.0.1.8.0: ya no hay alarma de seguridad, pero el aviso muestra el motivo de la intención (*"payment retries limit reached"*) en vez del de la tarjeta. Corregido en 18.0.1.9.0, pendiente de reprueba. §3.31 |
+| C3 | Cobro rechazado | Tarjeta de rechazo en la terminal | Diálogo con el `reason_code`, línea en `retry`, el cajero puede reintentar |🔴 2026-10-07: la línea queda reintentable y no se contabiliza nada, pero Nave devuelve `BLOCKED` y el cajero lee *"Nave bloqueó la operación por motivos de seguridad. Contactá a Nave antes de reintentar"* por una tarjeta sin fondos. §3.30. ⚠️ Reprueba con 18.0.1.8.0: ya no hay alarma de seguridad, pero el aviso muestra el motivo de la intención (*"payment retries limit reached"*) en vez del de la tarjeta. ✅ Reprueba con 18.0.1.9.0: *"La tarjeta no tiene fondos suficientes. Podés reintentar o cobrar con otro medio."*, con el código sólo en el bloque de soporte. §3.31 |
 | C4 | Cancelación desde Odoo | Iniciar cobro → botón Cancel | `DELETE` a Nave y la **terminal vuelve a reposo**. Ojo: `send_payment_cancel` retorna `true` siempre, incluso si el DELETE falló (`payment_nave.js:185-190`) | ⬜ |
-| C5 | Cancelación desde la terminal | Iniciar cobro → cancelar en el equipo | Nave notifica `DISABLED` con `manual_disabled_by_user`. **Se espera loop infinito** (B4) |⚠️ 2026-10-07: la terminal vuelve a reposo ("Ingresá el monto a cobrar") y el POS cierra la línea como reintentable. Pero el motivo que se le muestra al cajero es el mismo código que en C6, así que **no se distingue una cancelación de un vencimiento**. §3.29 |
-| C6 | Expiración de la intención | Iniciar cobro y no tocar nada 300 s | Nave marca `EXPIRED`. **Se espera loop infinito** (B4) |⚠️ 2026-10-07: **no hay loop infinito**. Nave no manda `EXPIRED` sino `DISABLED` con `payment_request_is_disabled`: la terminal da de baja la intención. La línea queda reintentable y no se contabiliza nada, pero el cajero lee el código crudo. §3.28 |
+| C5 | Cancelación desde la terminal | Iniciar cobro → cancelar en el equipo | Nave notifica `DISABLED` con `manual_disabled_by_user`. **Se espera loop infinito** (B4) |⚠️ 2026-10-07: la terminal vuelve a reposo ("Ingresá el monto a cobrar") y el POS cierra la línea como reintentable. Pero el motivo que se le muestra al cajero es el mismo código que en C6, así que **no se distingue una cancelación de un vencimiento**. §3.29. ✅ Reprueba con 18.0.1.9.0: *"El cobro ya no está disponible. Generá un cobro nuevo."*, sin código en la explicación. Nave no informa el motivo de la baja en el 400. §3.31 |
+| C6 | Expiración de la intención | Iniciar cobro y no tocar nada 300 s | Nave marca `EXPIRED`. **Se espera loop infinito** (B4) |⚠️ 2026-10-07: **no hay loop infinito**. Nave no manda `EXPIRED` sino `DISABLED` con `payment_request_is_disabled`: la terminal da de baja la intención. La línea queda reintentable y no se contabiliza nada, pero el cajero lee el código crudo. §3.28. ✅ Reprueba con 18.0.1.9.0: esta vez Nave respondió `EXPIRED` a los 303 s y el cajero leyó *"Cobro expirado"*. Un vencimiento llega a veces como `EXPIRED` y a veces como baja; el aviso es correcto en los dos casos. §3.31 |
 | C7 | Salir de la pantalla de pago | Iniciar cobro → botón Back | La intención queda viva: **la terminal sigue cobrable**. No hay `close()` implementado | ⬜ |
 | C8 | Corte de red durante el polling 🔴 | Iniciar cobro y cortar la conexión de Odoo | **Se espera spinner infinito sin diálogo de error** (B4). Verificar que la única salida es "Force done" | ⬜ |
 | C9 | "Force done" con pago rechazado | Rechazar en la terminal y presionar Force done | La venta se cierra como cobrada sin cobro real. **Hallazgo a documentar y mitigar** | ⬜ |

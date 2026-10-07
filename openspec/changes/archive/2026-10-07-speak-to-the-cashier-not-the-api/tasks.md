@@ -54,7 +54,7 @@
 - [x] 5.2 Correr las suites de `payment_nave` y `pos_nave`, más flake8 y bandit según
       `.agent/rules.md` §6. Verificar: 0 fallos, 0 errores de lint y 0 hallazgos de severidad media
       o superior.
-- [ ] 5.3 Desplegar y repetir con la terminal el rechazo por fondos, la cancelación desde la
+- [x] 5.3 Desplegar y repetir con la terminal el rechazo por fondos, la cancelación desde la
       terminal y el vencimiento. Verificar: los tres avisos describen la situación, el código
       aparece sólo en el bloque de soporte, el log registra los tres desenlaces, y quedan
       registrados en el plan de homologación con sus capturas. Anotar si el 400 de baja trae el
