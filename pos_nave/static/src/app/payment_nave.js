@@ -16,14 +16,19 @@ import { register_payment_method } from "@point_of_sale/app/store/pos_store";
 const NAVE_STATUS = {
     // Cobro exitoso
     SUCCESS: ["SUCCESS_PROCESSED", "APPROVED"],
-    // Cobro rechazado por el emisor o la terminal
-    FAILURE: ["FAILURE_PROCESSED", "REJECTED"],
-    // Intención dada de baja (por el cajero en la terminal, por batería, por timeout...)
+    // Cobro rechazado por el emisor o la terminal.
+    //
+    // BLOCKED está acá y no en una rama de fraude a pesar de lo que sugiere su nombre: probado con
+    // dos tarjetas sin fondos distintas, Nave devuelve BLOCKED para un rechazo corriente, y la
+    // terminal muestra en ambos casos "la tarjeta no tiene el dinero necesario, podés intentar con
+    // otra". Tratarlo como bloqueo de seguridad mandaba al cajero a llamar a Nave con el cliente
+    // esperando, por una tarjeta sin saldo.
+    FAILURE: ["FAILURE_PROCESSED", "REJECTED", "BLOCKED"],
+    // Intención dada de baja: cancelada en la terminal, vencida, o porque Nave no pudo avisarle al
+    // equipo. Desde Odoo las tres son indistinguibles.
     DISABLED: ["DISABLED", "CANCELLED"],
     // La intención superó su duration_time sin cobrarse
     EXPIRED: ["EXPIRED"],
-    // Bloqueada por seguridad o fraude
-    BLOCKED: ["BLOCKED"],
     // Todavía en curso: seguimos consultando
     IN_PROGRESS: ["PENDING", "PROCESSED", "PROCESSING"],
 };
@@ -212,7 +217,8 @@ export class PaymentNave extends PaymentInterface {
 
             this.transportErrors = 0;
             const statusName = String(data?.status?.name || "").toUpperCase();
-            const reason = data?.status?.reason_name || data?.status?.reason_code || "";
+            const motivoCrudo = data?.status?.reason_name || data?.status?.reason_code || "";
+            const motivo = this._motivo_legible(motivoCrudo);
 
             if (NAVE_STATUS.SUCCESS.includes(statusName)) {
                 this._stop_polling();
@@ -224,8 +230,10 @@ export class PaymentNave extends PaymentInterface {
             if (NAVE_STATUS.FAILURE.includes(statusName)) {
                 this._stop_polling();
                 this._showError(
-                    _t("Pago rechazado: %s", reason || _t("sin motivo informado")),
-                    _t("Rechazo en terminal")
+                    motivo
+                        ? _t("El pago fue rechazado: %s. Probá con otra tarjeta.", motivo)
+                        : _t("El pago fue rechazado. Probá con otra tarjeta."),
+                    _t("Pago rechazado")
                 );
                 line.set_payment_status("retry");
                 return false;
@@ -234,10 +242,10 @@ export class PaymentNave extends PaymentInterface {
             if (NAVE_STATUS.DISABLED.includes(statusName)) {
                 this._stop_polling();
                 this._showError(
-                    reason
-                        ? _t("El cobro fue dado de baja: %s", reason)
-                        : _t("El cobro fue dado de baja en la terminal."),
-                    _t("Cobro cancelado")
+                    motivo
+                        ? _t("El cobro ya no está disponible: %s. Generá uno nuevo.", motivo)
+                        : _t("El cobro ya no está disponible. Generá uno nuevo."),
+                    _t("Cobro dado de baja")
                 );
                 line.set_payment_status("retry");
                 return false;
@@ -248,16 +256,6 @@ export class PaymentNave extends PaymentInterface {
                 this._showError(
                     _t("La intención de cobro expiró sin recibir el pago. Generá un cobro nuevo."),
                     _t("Cobro expirado")
-                );
-                line.set_payment_status("retry");
-                return false;
-            }
-
-            if (NAVE_STATUS.BLOCKED.includes(statusName)) {
-                this._stop_polling();
-                this._showError(
-                    _t("Nave bloqueó la operación por motivos de seguridad. Contactá a Nave antes de reintentar."),
-                    _t("Operación bloqueada")
                 );
                 line.set_payment_status("retry");
                 return false;
@@ -361,6 +359,29 @@ export class PaymentNave extends PaymentInterface {
     /**
      * Corta el bucle y limpia el temporizador pendiente.
      */
+    /**
+     * Devuelve el motivo sólo si una persona puede leerlo.
+     *
+     * Nave manda a veces una frase y a veces un identificador como `no_amount_available`. Mostrarlo
+     * tal cual le dejaba al cajero un código en pantalla, incluso uno que fabricaba este módulo.
+     *
+     * Se juzga por la forma y no por una lista de códigos conocidos: Nave no publica su catálogo,
+     * así que cualquier lista nuestra estaría incompleta desde el día uno y dejaría pasar el
+     * próximo. El motivo completo queda en la consola para quien tenga que diagnosticar.
+     */
+    _motivo_legible(motivo) {
+        if (!motivo) {
+            return "";
+        }
+        const texto = String(motivo).trim();
+        const pareceCodigo = /^[a-z0-9]+([_.-][a-z0-9]+)+$/i.test(texto) || !/\s/.test(texto);
+        if (pareceCodigo) {
+            console.info("[pos_nave] Motivo informado por Nave:", texto);
+            return "";
+        }
+        return texto;
+    }
+
     /**
      * Cuánto esperar como mucho, derivado del plazo con el que se creó la intención.
      *

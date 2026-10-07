@@ -223,12 +223,13 @@ class PosPaymentMethod(models.Model):
                 _logger.info(
                     "[pos_nave] La intención %s fue dada de baja en Nave.", intent_id
                 )
+                # Sin `reason_code`: el único valor disponible sería el nombre del error HTTP, que
+                # no es un motivo de negocio. Copiarlo acá hacía que el cajero leyera
+                # `payment_request_is_disabled` en pantalla, un identificador que sólo existe en
+                # este código.
                 return {
                     'id': intent_id,
-                    'status': {
-                        'name': 'DISABLED',
-                        'reason_code': 'payment_request_is_disabled',
-                    },
+                    'status': {'name': 'DISABLED'},
                 }
             _logger.error("[pos_nave] Error consultando estado en Nave: %s", e)
             return {'error': True, 'message': self._nave_error_message(e)}

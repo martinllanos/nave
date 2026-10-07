@@ -503,7 +503,10 @@ class TestPosNavePayment(TransactionCase):
 
         self.assertNotIn('error', res, "No es un error de consulta sino el desenlace del cobro")
         self.assertEqual(res['status']['name'], 'DISABLED')
-        self.assertEqual(res['status']['reason_code'], 'payment_request_is_disabled')
+        # Sin motivo: el único disponible sería el nombre del error HTTP, que el cajero terminaba
+        # leyendo en pantalla como si fuera la explicación de lo que pasó.
+        self.assertNotIn('reason_code', res['status'])
+        self.assertNotIn('reason_name', res['status'])
 
     @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.get')
     def test_27_other_400s_are_still_errors(self, mock_get):
@@ -551,3 +554,32 @@ class TestPosNavePayment(TransactionCase):
             mock_post.call_args[1]['json']['duration_time'], NAVE_INTENT_DURATION_SECONDS,
             "El plazo que se informa debe ser el mismo que se le pidió a Nave",
         )
+
+    def test_31_blocked_is_treated_as_a_rejection(self):
+        """`BLOCKED` tiene que leerse como un rechazo, no como un bloqueo de seguridad.
+
+        Probado con dos tarjetas sin fondos distintas: Nave devuelve BLOCKED para un rechazo
+        corriente. Tratarlo como fraude mandaba al cajero a llamar al proveedor con el cliente
+        esperando.
+
+        El módulo no tiene infraestructura de tests de JavaScript, así que esto vigila el fuente: no
+        prueba el comportamiento, pero falla si alguien devuelve `BLOCKED` a una rama de seguridad o
+        reintroduce el texto que mandaba a contactar a Nave.
+        """
+        import pathlib
+        js = (pathlib.Path(__file__).parent.parent / 'static' / 'src' / 'app' / 'payment_nave.js').read_text()
+
+        catalogo = js.split('const NAVE_STATUS', 1)[1].split('};', 1)[0]
+        linea_rechazo = next(linea for linea in catalogo.splitlines()
+                             if linea.strip().startswith('FAILURE:'))
+        self.assertIn('BLOCKED', linea_rechazo,
+                      "BLOCKED debe estar clasificado junto a los rechazos")
+        self.assertNotIn('BLOCKED:', catalogo,
+                         "No debe quedar una rama propia de bloqueo por seguridad")
+
+        self.assertNotIn('motivos de seguridad', js,
+                         "El cajero no debe recibir un aviso de seguridad por un rechazo")
+        self.assertNotIn('Contactá a Nave antes de reintentar', js,
+                         "No se le pide al cajero que llame al proveedor por un rechazo")
+        self.assertIn('Probá con otra tarjeta', js,
+                      "El aviso de rechazo debe decirle al cajero qué hacer")
