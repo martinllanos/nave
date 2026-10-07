@@ -1952,9 +1952,29 @@ Estructura sugerida: `evidencias/<ID_caso>/` con `pantalla.mp4|png`, `odoo.log`,
   de liquidación, y no menciona `DELETE /api/payments/{id}`, que es el que usan los módulos. Lo más
   probable es que el 403 de IAM sea el de una ruta vieja que sigue mapeada pero ya no se le habilita
   a integradores nuevos. Detalle del endpoint y sus errores en `docs/nave_codigos_referencia.md` §8.
-  Lo que sigue: sondear el endpoint nuevo en sandbox con un pago inexistente y, si responde, migrar
-  las devoluciones de los dos módulos. Si responde `REFUND_NOT_ENABLED`, lo que hay que pedirle a
-  Nave es que habilite las devoluciones en el perfil del comercio.
+
+  **Sondeo en sandbox (2026-10-07), desde la base local con un pago inexistente:**
+
+  | Petición | Respuesta |
+  |---|---|
+  | `POST /integrations/ruta_que_no_existe_jamas` (control) | 403 *"Invalid key=value pair…"*: ruta no mapeada |
+  | `DELETE /api/payments/{id}` | 403 *"…no identity-based policy allows the execute-api:Invoke action"* |
+  | `POST /integrations/payments/{id}/refunds`, en `api-sandbox` y en `e3-api` | **el mismo 403 de IAM** |
+  | El mismo `POST` con `amount` en el body | el mismo 403 de IAM |
+
+  **El endpoint nuevo existe, y tampoco tenemos permiso.** El token de sandbox trae
+  `scope = write.payment_request read.payment read.payment_request`: puede crear y dar de baja
+  intenciones y leer pagos, pero **no tiene ningún permiso de escritura sobre pagos**, y una
+  devolución lo es. Eso explica el 403 en los dos endpoints.
+
+  **Pedido concreto a Nave:** agregar a nuestro `client_id`, en sandbox y en producción, el permiso
+  que habilita `POST /integrations/payments/{id}/refunds`, y confirmar que las devoluciones estén
+  habilitadas en el perfil del comercio (si no, la API respondería `REFUND_NOT_ENABLED`). Conviene
+  pedir también que confirmen el body de una devolución total, porque el único ejemplo documentado
+  lleva sólo `tip_amount`.
+
+  Aunque el permiso llegue, los módulos tienen que migrar al endpoint nuevo: el viejo ya no está
+  documentado.
 
   *Nota original (2026-10-05):* **El endpoint de devolución existe; lo que falta es el
   permiso.** Ya no hay que preguntar si la ruta sigue viva: el sondeo contra sandbox la distingue de
