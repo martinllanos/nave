@@ -212,7 +212,7 @@ class PosPaymentMethod(models.Model):
         OJO: este endpoint devuelve el estado de la INTENCIÓN (PENDING, PROCESSED,
         SUCCESS_PROCESSED, FAILURE_PROCESSED, DISABLED, EXPIRED, BLOCKED), que NO es el mismo
         vocabulario que el del PAGO (APPROVED, REJECTED, ...) que devuelve
-        GET /ranty-payments/payments/{payment_id}. El mapeo vive en el JS (NAVE_STATUS).
+        GET /ranty-payments/payments/{payment_id}. La clasificación está en NAVE_OUTCOME_BY_STATUS.
         """
         if not self.env.user.has_group('point_of_sale.group_pos_user'):
             raise AccessError(_("No tienes permisos para consultar solicitudes a Nave."))
