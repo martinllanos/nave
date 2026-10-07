@@ -5,6 +5,8 @@ import requests
 from odoo import api, fields, models, _
 from odoo.exceptions import UserError, AccessError
 
+from odoo.addons.payment_nave.models.nave_reasons import nave_reason_message
+
 _logger = logging.getLogger(__name__)
 
 # Timeouts de las llamadas a Nave, en segundos.
@@ -21,6 +23,10 @@ NAVE_TIMEOUTS = {
     'cancel': 10,
     'refund': 15,
 }
+
+# Estados de la intención en los que el cobro ya terminó, salga bien o mal. Al llegar a uno de
+# ellos el POS deja de consultar, así que es el momento de dejar registrado el desenlace.
+NAVE_INTENT_FINAL_STATUSES = {'SUCCESS_PROCESSED', 'FAILURE_PROCESSED', 'BLOCKED', 'DISABLED', 'EXPIRED'}
 
 # Cuánto vale una intención de cobro presencial, en segundos. Cinco minutos es holgado con el
 # cliente parado frente a la caja, y es la cota de cuánto puede quedar la terminal esperando.
@@ -212,6 +218,10 @@ class PosPaymentMethod(models.Model):
                 payment = self._nave_fetch_payment(provider, payment_id, payment_type)
                 if payment:
                     data['nave_payment'] = payment
+            reason = self._nave_resolve_reason(data)
+            if reason:
+                data['nave_reason'] = reason
+            self._nave_log_outcome(intent_id, data)
             return data
         except requests.exceptions.RequestException as e:
             # Nave responde 400 `payment_request_is_disabled` cuando la intención fue dada de baja,
@@ -220,17 +230,23 @@ class PosPaymentMethod(models.Model):
             # cobro. Se traduce al vocabulario de estados para que el POS lo cierre como
             # corresponde en vez de mostrar un error técnico.
             if self._nave_error_code(e) == 'payment_request_is_disabled':
+                # Se registra el cuerpo entero porque todavía no sabemos si Nave informa acá el
+                # motivo de la baja, que sí documenta: si lo trae, el log lo muestra y lo usamos.
                 _logger.info(
-                    "[pos_nave] La intención %s fue dada de baja en Nave.", intent_id
+                    "[pos_nave] La intención %s fue dada de baja en Nave. Respuesta: %s",
+                    intent_id, self._nave_error_body(e),
                 )
-                # Sin `reason_code`: el único valor disponible sería el nombre del error HTTP, que
-                # no es un motivo de negocio. Copiarlo acá hacía que el cajero leyera
-                # `payment_request_is_disabled` en pantalla, un identificador que sólo existe en
-                # este código.
-                return {
+                # El nombre del error HTTP no se informa como motivo: no es un motivo de negocio,
+                # y copiarlo hacía que el cajero leyera `payment_request_is_disabled` en pantalla.
+                data = {
                     'id': intent_id,
                     'status': {'name': 'DISABLED'},
                 }
+                reason = self._nave_disabled_reason(self._nave_error_payload(e))
+                if reason:
+                    data['nave_reason'] = reason
+                self._nave_log_outcome(intent_id, data)
+                return data
             _logger.error("[pos_nave] Error consultando estado en Nave: %s", e)
             return {'error': True, 'message': self._nave_error_message(e)}
 
@@ -282,16 +298,98 @@ class PosPaymentMethod(models.Model):
             )
         return _("Nave respondió con un error %s.", status_code)
 
-    def _nave_error_code(self, exc):
-        """ Código de error que devuelve Nave en el cuerpo, o False si no lo trae. """
+    def _nave_error_payload(self, exc):
+        """ Cuerpo JSON de una respuesta de error de Nave, o {} si no lo hay o no es un objeto. """
         response = getattr(exc, 'response', None)
         if response is None:
-            return False
+            return {}
         try:
             payload = response.json()
         except ValueError:
-            return False
-        return payload.get('code') if isinstance(payload, dict) else False
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _nave_error_body(self, exc):
+        """ Cuerpo crudo de una respuesta de error, recortado para el log. """
+        response = getattr(exc, 'response', None)
+        if response is None:
+            return ''
+        return (response.text or '')[:500]
+
+    def _nave_error_code(self, exc):
+        """ Código de error que devuelve Nave en el cuerpo, o False si no lo trae. """
+        return self._nave_error_payload(exc).get('code') or False
+
+    def _nave_reason(self, code, source):
+        """ Motivo listo para el POS: el código tal cual, para soporte, y el mensaje de Nave.
+
+        `message` queda vacío si Nave no publica uno para ese código. El POS describe entonces la
+        situación sin motivo, y el código sigue visible en el bloque de soporte.
+        """
+        code = str(code).strip()
+        return {
+            'code': code,
+            'message': nave_reason_message(self.env, code),
+            'source': source,
+        }
+
+    def _nave_resolve_reason(self, data):
+        """ Motivo del desenlace de un cobro, o False si Nave no informa ninguno.
+
+        Se toma del pago, que es donde Nave informa por qué se rechazó la tarjeta
+        (`status.reason_code`). La intención tiene su propio motivo, que describe a la intención:
+        una tarjeta sin fondos la deja en BLOCKED con "payment retries limit reached". Ese sólo se
+        usa si no hay pago, y como no está en el catálogo, no llega a la explicación del aviso.
+        """
+        payment_status = (data.get('nave_payment') or {}).get('status') or {}
+        if payment_status.get('reason_code'):
+            return self._nave_reason(payment_status['reason_code'], 'payment')
+
+        intent_status = data.get('status') or {}
+        code = (
+            intent_status.get('reason_code')
+            or intent_status.get('reason_name')
+            or self._nave_disabled_reason_code(data)
+        )
+        return self._nave_reason(code, 'intent') if code else False
+
+    def _nave_disabled_reason_code(self, payload):
+        """ Código del motivo de baja de una intención, si viene en `payload`.
+
+        Nave documenta el motivo como `reason.code` y, en la notificación de la intención, como
+        `disabled_reason`. Se aceptan las dos formas porque no está verificado cuál usa cada
+        respuesta.
+        """
+        for key in ('reason', 'disabled_reason'):
+            value = payload.get(key)
+            if isinstance(value, dict) and value.get('code'):
+                return value['code']
+            if isinstance(value, str) and value.strip():
+                return value
+        return False
+
+    def _nave_disabled_reason(self, payload):
+        """ Motivo de baja que trae el cuerpo de un 400 `payment_request_is_disabled`, o False. """
+        code = self._nave_disabled_reason_code(payload)
+        return self._nave_reason(code, 'intent') if code else False
+
+    def _nave_log_outcome(self, intent_id, data):
+        """ Registra el desenlace de un cobro que llegó a un estado final.
+
+        Es el único rastro que queda: el aviso del POS desaparece cuando el cajero lo cierra, y un
+        cobro rechazado no deja ningún registro en Odoo. Lleva lo que pide la soporte para buscarlo
+        del lado de Nave.
+        """
+        status = str((data.get('status') or {}).get('name') or '').upper()
+        if status not in NAVE_INTENT_FINAL_STATUSES:
+            return
+        reason = data.get('nave_reason') or {}
+        _logger.info(
+            "[pos_nave] Cobro %s terminado en %s. Intención: %s. Pago: %s. Motivo: %s (%s).",
+            data.get('external_payment_id') or '-', status, intent_id,
+            data.get('nave_payment_id') or '-', reason.get('code') or '-',
+            reason.get('message') or 'sin mensaje publicado',
+        )
 
     def _nave_error_message(self, exc):
         """ Extrae un mensaje legible de una excepción de `requests` contra la API de Nave. """

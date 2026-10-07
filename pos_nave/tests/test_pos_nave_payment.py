@@ -61,6 +61,33 @@ PAYMENT_QR_APPROVED = {
 }
 
 
+# Una tarjeta sin fondos, como en la reprueba de C3: la intención queda en BLOCKED por los intentos
+# excedidos, y el motivo del rechazo de la tarjeta está en el pago.
+INTENT_BLOCKED = {
+    'id': 'intent-blk',
+    'payment_type': 'smart_pos',
+    'external_payment_id': 'POS-ORDER-BLK',
+    'status': {'name': 'BLOCKED', 'reason_name': 'payment retries limit reached'},
+    'payment_attempts': {
+        'attempts': 1,
+        'payments': [{'payment_id': 'pay-rej', 'status': 'REJECTED'}],
+    },
+}
+
+PAYMENT_REJECTED = {
+    'id': 'pay-rej',
+    'status': {
+        'name': 'REJECTED',
+        'reason_code': 'no_amount_available',
+        'reason_name': 'No amount available',
+    },
+    'payment_method': {},
+    'transactions': [],
+}
+
+POS_LOGGER = 'odoo.addons.pos_nave.models.pos_payment_method'
+
+
 @tagged('post_install', '-at_install', 'pos_nave')
 class TestPosNavePayment(TransactionCase):
 
@@ -507,6 +534,7 @@ class TestPosNavePayment(TransactionCase):
         # leyendo en pantalla como si fuera la explicación de lo que pasó.
         self.assertNotIn('reason_code', res['status'])
         self.assertNotIn('reason_name', res['status'])
+        self.assertNotIn('nave_reason', res, "Sin motivo en el cuerpo, no se afirma ninguna causa")
 
     @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.get')
     def test_27_other_400s_are_still_errors(self, mock_get):
@@ -558,13 +586,14 @@ class TestPosNavePayment(TransactionCase):
     def test_31_blocked_is_treated_as_a_rejection(self):
         """`BLOCKED` tiene que leerse como un rechazo, no como un bloqueo de seguridad.
 
-        Probado con dos tarjetas sin fondos distintas: Nave devuelve BLOCKED para un rechazo
-        corriente. Tratarlo como fraude mandaba al cajero a llamar al proveedor con el cliente
-        esperando.
+        Nave lo define como "intención bloqueada por fraude o intentos excedidos", y el caso
+        frecuente es el segundo: una tarjeta sin fondos. Lo que distingue un fraude es el motivo del
+        pago, que el backend resuelve y tiene sus propios tests.
 
-        El módulo no tiene infraestructura de tests de JavaScript, así que esto vigila el fuente: no
-        prueba el comportamiento, pero falla si alguien devuelve `BLOCKED` a una rama de seguridad o
-        reintroduce el texto que mandaba a contactar a Nave.
+        La clasificación de estados vive en el navegador y el módulo no tiene infraestructura de
+        tests de JavaScript, así que esto vigila el fuente. Se limita a la clasificación a
+        propósito: los textos del aviso salen del catálogo y de la resolución del backend, que se
+        prueban por su comportamiento.
         """
         import pathlib
         js = (pathlib.Path(__file__).parent.parent / 'static' / 'src' / 'app' / 'payment_nave.js').read_text()
@@ -577,9 +606,112 @@ class TestPosNavePayment(TransactionCase):
         self.assertNotIn('BLOCKED:', catalogo,
                          "No debe quedar una rama propia de bloqueo por seguridad")
 
-        self.assertNotIn('motivos de seguridad', js,
-                         "El cajero no debe recibir un aviso de seguridad por un rechazo")
-        self.assertNotIn('Contactá a Nave antes de reintentar', js,
-                         "No se le pide al cajero que llame al proveedor por un rechazo")
-        self.assertIn('Probá con otra tarjeta', js,
-                      "El aviso de rechazo debe decirle al cajero qué hacer")
+    # ──────────────────────────────────────────────
+    # MOTIVO DEL DESENLACE
+    # ──────────────────────────────────────────────
+
+    @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.get')
+    def test_32_the_reason_comes_from_the_payment_not_the_intent(self, mock_get):
+        """El motivo de un rechazo es el del pago.
+
+        Es lo que mostró la reprueba de C3: el aviso leía el motivo de la intención y el cajero vio
+        "payment retries limit reached" por una tarjeta sin fondos.
+        """
+        mock_get.side_effect = [_mock_response(INTENT_BLOCKED), _mock_response(PAYMENT_REJECTED)]
+
+        res = self.pos_payment_method.nave_check_payment_status(
+            self.pos_payment_method.id, intent_id='intent-blk'
+        )
+
+        self.assertEqual(res['nave_reason'], {
+            'code': 'no_amount_available',
+            'message': "La tarjeta no tiene fondos suficientes.",
+            'source': 'payment',
+        })
+
+    @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.get')
+    def test_33_without_payment_the_intent_reason_is_only_for_support(self, mock_get):
+        """Sin pago, el código de la intención se informa, pero no se convierte en explicación."""
+        import requests
+        mock_get.side_effect = [
+            _mock_response(INTENT_BLOCKED),
+            requests.exceptions.RequestException("boom"),
+        ]
+
+        res = self.pos_payment_method.nave_check_payment_status(
+            self.pos_payment_method.id, intent_id='intent-blk'
+        )
+
+        self.assertEqual(res['nave_reason']['code'], 'payment retries limit reached')
+        self.assertEqual(res['nave_reason']['source'], 'intent')
+        self.assertEqual(res['nave_reason']['message'], '',
+                         "Un motivo que Nave no publica no se presenta como la causa")
+
+    @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.get')
+    def test_34_disabled_intent_uses_the_reason_if_nave_sends_it(self, mock_get):
+        """Si el cuerpo del 400 trae el motivo de la baja, el cajero lo lee en palabras de Nave."""
+        mock_get.side_effect = self._http_error(
+            400,
+            '{"code": "payment_request_is_disabled", "message": "Payment request is disabled", '
+            '"reason": {"code": "manual_disabled_by_user", "description": "x"}}',
+        )
+
+        res = self.pos_payment_method.nave_check_payment_status(
+            self.pos_payment_method.id, intent_id='intent-off'
+        )
+
+        self.assertEqual(res['status']['name'], 'DISABLED')
+        self.assertEqual(res['nave_reason']['code'], 'manual_disabled_by_user')
+        self.assertEqual(res['nave_reason']['message'],
+                         "El pago fue cancelado por el usuario dentro de la terminal.")
+
+    def test_35_disabled_reason_shapes(self):
+        """Nave documenta el motivo de baja como `reason.code` y como `disabled_reason`."""
+        method = self.pos_payment_method
+        self.assertEqual(
+            method._nave_disabled_reason_code({'reason': {'code': 'low_battery'}}), 'low_battery'
+        )
+        self.assertEqual(
+            method._nave_disabled_reason_code({'disabled_reason': 'disabled_by_user_timeout'}),
+            'disabled_by_user_timeout',
+        )
+        self.assertFalse(method._nave_disabled_reason_code({'code': 'payment_request_is_disabled'}))
+        self.assertFalse(method._nave_disabled_reason_code({'reason': {}}))
+
+    @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.get')
+    def test_36_the_outcome_is_logged(self, mock_get):
+        """El aviso se cierra y el rechazo no deja nada en Odoo: el log es el único rastro."""
+        mock_get.side_effect = [_mock_response(INTENT_BLOCKED), _mock_response(PAYMENT_REJECTED)]
+
+        with self.assertLogs(POS_LOGGER, level='INFO') as logs:
+            self.pos_payment_method.nave_check_payment_status(
+                self.pos_payment_method.id, intent_id='intent-blk'
+            )
+
+        registro = next(line for line in logs.output if 'terminado en' in line)
+        for dato in ('POS-ORDER-BLK', 'BLOCKED', 'intent-blk', 'pay-rej', 'no_amount_available'):
+            self.assertIn(dato, registro)
+
+    @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.get')
+    def test_37_a_pending_intent_is_not_logged_as_an_outcome(self, mock_get):
+        """Se consulta cada 3 segundos: registrar cada consulta llenaría el log de ruido."""
+        mock_get.return_value = _mock_response({'id': 'intent-1234', 'status': {'name': 'PENDING'}})
+
+        with self.assertNoLogs(POS_LOGGER, level='INFO'):
+            self.pos_payment_method.nave_check_payment_status(
+                self.pos_payment_method.id, intent_id='intent-1234'
+            )
+
+    @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.get')
+    def test_38_the_disabled_body_is_logged(self, mock_get):
+        """Falta verificar si Nave informa el motivo de la baja en el 400. El log lo va a mostrar."""
+        body = '{"code": "payment_request_is_disabled", "message": "Payment request is disabled"}'
+        mock_get.side_effect = self._http_error(400, body)
+
+        with self.assertLogs(POS_LOGGER, level='INFO') as logs:
+            self.pos_payment_method.nave_check_payment_status(
+                self.pos_payment_method.id, intent_id='intent-off'
+            )
+
+        self.assertTrue(any(body in line for line in logs.output))
+        self.assertTrue(any('terminado en DISABLED' in line for line in logs.output))

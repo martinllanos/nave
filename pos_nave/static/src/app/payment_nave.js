@@ -18,14 +18,16 @@ const NAVE_STATUS = {
     SUCCESS: ["SUCCESS_PROCESSED", "APPROVED"],
     // Cobro rechazado por el emisor o la terminal.
     //
-    // BLOCKED está acá y no en una rama de fraude a pesar de lo que sugiere su nombre: probado con
-    // dos tarjetas sin fondos distintas, Nave devuelve BLOCKED para un rechazo corriente, y la
-    // terminal muestra en ambos casos "la tarjeta no tiene el dinero necesario, podés intentar con
-    // otra". Tratarlo como bloqueo de seguridad mandaba al cajero a llamar a Nave con el cliente
-    // esperando, por una tarjeta sin saldo.
+    // BLOCKED está acá y no en una rama de fraude: Nave lo define como "intención bloqueada por
+    // fraude o intentos excedidos", y el caso corriente es el segundo. Una tarjeta sin fondos deja
+    // la intención en BLOCKED por los intentos excedidos. Tratarlo como bloqueo de seguridad
+    // mandaba al cajero a llamar a Nave con el cliente esperando, por una tarjeta sin saldo.
+    //
+    // Lo que distingue un fraude es el motivo del pago (fraud_identification, risky_payment,
+    // fraud_suspected), y ese motivo llega resuelto en `nave_reason`.
     FAILURE: ["FAILURE_PROCESSED", "REJECTED", "BLOCKED"],
     // Intención dada de baja: cancelada en la terminal, vencida, o porque Nave no pudo avisarle al
-    // equipo. Desde Odoo las tres son indistinguibles.
+    // equipo. Si Nave informa cuál fue, llega resuelto en `nave_reason`.
     DISABLED: ["DISABLED", "CANCELLED"],
     // La intención superó su duration_time sin cobrarse
     EXPIRED: ["EXPIRED"],
@@ -217,8 +219,6 @@ export class PaymentNave extends PaymentInterface {
 
             this.transportErrors = 0;
             const statusName = String(data?.status?.name || "").toUpperCase();
-            const motivoCrudo = data?.status?.reason_name || data?.status?.reason_code || "";
-            const motivo = this._motivo_legible(motivoCrudo);
 
             if (NAVE_STATUS.SUCCESS.includes(statusName)) {
                 this._stop_polling();
@@ -230,9 +230,12 @@ export class PaymentNave extends PaymentInterface {
             if (NAVE_STATUS.FAILURE.includes(statusName)) {
                 this._stop_polling();
                 this._showError(
-                    motivo
-                        ? _t("El pago fue rechazado: %s. Probá con otra tarjeta.", motivo)
-                        : _t("El pago fue rechazado. Probá con otra tarjeta."),
+                    this._outcome_notice(
+                        data,
+                        intent_id,
+                        _t("El pago fue rechazado."),
+                        _t("Podés reintentar o cobrar con otro medio.")
+                    ),
                     _t("Pago rechazado")
                 );
                 line.set_payment_status("retry");
@@ -242,9 +245,12 @@ export class PaymentNave extends PaymentInterface {
             if (NAVE_STATUS.DISABLED.includes(statusName)) {
                 this._stop_polling();
                 this._showError(
-                    motivo
-                        ? _t("El cobro ya no está disponible: %s. Generá uno nuevo.", motivo)
-                        : _t("El cobro ya no está disponible. Generá uno nuevo."),
+                    this._outcome_notice(
+                        data,
+                        intent_id,
+                        _t("El cobro ya no está disponible."),
+                        _t("Generá un cobro nuevo.")
+                    ),
                     _t("Cobro dado de baja")
                 );
                 line.set_payment_status("retry");
@@ -254,7 +260,12 @@ export class PaymentNave extends PaymentInterface {
             if (NAVE_STATUS.EXPIRED.includes(statusName)) {
                 this._stop_polling();
                 this._showError(
-                    _t("La intención de cobro expiró sin recibir el pago. Generá un cobro nuevo."),
+                    this._outcome_notice(
+                        data,
+                        intent_id,
+                        _t("La intención de cobro expiró sin recibir el pago."),
+                        _t("Generá un cobro nuevo.")
+                    ),
                     _t("Cobro expirado")
                 );
                 line.set_payment_status("retry");
@@ -357,29 +368,28 @@ export class PaymentNave extends PaymentInterface {
     }
 
     /**
-     * Corta el bucle y limpia el temporizador pendiente.
-     */
-    /**
-     * Devuelve el motivo sólo si una persona puede leerlo.
+     * Arma el aviso de un cobro que no se completó: qué pasó, qué hacer y los datos para soporte.
      *
-     * Nave manda a veces una frase y a veces un identificador como `no_amount_available`. Mostrarlo
-     * tal cual le dejaba al cajero un código en pantalla, incluso uno que fabricaba este módulo.
-     *
-     * Se juzga por la forma y no por una lista de códigos conocidos: Nave no publica su catálogo,
-     * así que cualquier lista nuestra estaría incompleta desde el día uno y dejaría pasar el
-     * próximo. El motivo completo queda en la consola para quien tenga que diagnosticar.
+     * Qué pasó sale del mensaje que Nave publica para el motivo, que el backend ya resolvió. Si
+     * Nave no publica uno, se usa `situation`, que describe el desenlace sin atribuirle una causa.
+     * El código no va nunca en la explicación: va aparte, rotulado, para que el cajero se lo pueda
+     * dictar a la soporte sin que se lea como la causa de lo que pasó.
      */
-    _motivo_legible(motivo) {
-        if (!motivo) {
-            return "";
+    _outcome_notice(data, intent_id, situation, action) {
+        const reason = data?.nave_reason || {};
+        const lines = [`${reason.message || situation} ${action}`];
+
+        const support = [];
+        if (reason.code) {
+            support.push(_t("Código: %s", reason.code));
         }
-        const texto = String(motivo).trim();
-        const pareceCodigo = /^[a-z0-9]+([_.-][a-z0-9]+)+$/i.test(texto) || !/\s/.test(texto);
-        if (pareceCodigo) {
-            console.info("[pos_nave] Motivo informado por Nave:", texto);
-            return "";
+        if (data?.nave_payment_id) {
+            support.push(_t("Pago: %s", data.nave_payment_id));
         }
-        return texto;
+        support.push(_t("Intención: %s", data?.id || intent_id));
+
+        lines.push("", _t("Para soporte:"), ...support);
+        return lines.join("\n");
     }
 
     /**
@@ -397,6 +407,9 @@ export class PaymentNave extends PaymentInterface {
         return durationMs + Math.max(durationMs * this.pollGraceRatio, this.pollGraceMinMs);
     }
 
+    /**
+     * Corta el bucle y limpia el temporizador pendiente.
+     */
     _stop_polling() {
         this.isPolling = false;
         if (this.pollingTimeout) {
