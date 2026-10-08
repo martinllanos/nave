@@ -243,6 +243,10 @@ cancelación desde Odoo funcionó hasta ahora (`plan_homologacion_nave.md` §3.3
   en el detalle y *"VISA DEBIT"* al pie (`docs/homologacion/evidencias/C3/`). Se repitió en un pago
   **aprobado** (C7c): *"MASTERCARD CREDIT 9537"* en el detalle, *"Debit Mastercard"* al pie, y la
   terminal mostró *"MASTERCARD Crédito"* (`docs/homologacion/evidencias/C7/c_4_cupon.png`).
+- **Nombre de la billetera.** En un pago con Belo, `wallet.name` llegó como *"bind pago"*, el
+  procesador. ¿Tienen la relación entre procesador y billetera o banco, o un campo con el nombre de
+  la app que usó el cliente? Lo queremos mostrar en el ticket (`plan_homologacion_nave.md` §3.40 y el
+  cambio `name-the-wallet-the-customer-used`).
 - **Impresión del cupón.** A veces la terminal imprime el cupón de rechazo y a veces no. ¿Se
   configura desde el sistema de gestión?
 - **Documentación.** El portal sólo se lee con un navegador. ¿Tienen una versión descargable, por
