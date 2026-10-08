@@ -332,6 +332,18 @@ class TestPosNavePayment(TransactionCase):
         self.assertEqual(payload['seller']['pos_id'], 'QR-POS-001')
 
     @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.post')
+    def test_12b_qr_send_log_names_the_qr(self, mock_post):
+        """El log del envío dice que el cobro va al QR, no a una terminal Smart POS."""
+        mock_post.return_value = _mock_response({'id': 'intent-qr-2'})
+        qr_method = self._make_qr_method()
+
+        with self.assertLogs(POS_LOGGER, level='INFO') as logs:
+            qr_method.nave_send_payment_intent(qr_method.id, amount=147.0, reference='POS-QR-002')
+
+        envio = [r.getMessage() for r in logs.records if 'Enviando el cobro' in r.getMessage()]
+        self.assertEqual(envio, ["[pos_nave] Enviando el cobro al QR QR-POS-001 (Ref: POS-QR-002)"])
+
+    @patch('odoo.addons.pos_nave.models.pos_payment_method.requests.post')
     def test_13_smart_pos_does_not_send_qr_amount(self, mock_post):
         """Nave Point no lleva qr_amount: es un campo propio del QR."""
         mock_post.return_value = _mock_response({'id': 'intent-1234'})

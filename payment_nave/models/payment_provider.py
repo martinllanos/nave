@@ -33,6 +33,9 @@ NAVE_TRUSTED_DOMAIN = 'ranty.io'
 # ninguno y los métodos de Nave quedan archivados, o sea invisibles en el checkout.
 NAVE_DEFAULT_PAYMENT_METHOD_CODES = {'card', 'naranja', 'nave_qr'}
 
+# Cuánto antes de su vencimiento se deja de usar un token. Ver _nave_get_access_token.
+NAVE_TOKEN_MARGIN_SECONDS = 30
+
 
 class PaymentProvider(models.Model):
     _inherit = 'payment.provider'
@@ -107,14 +110,18 @@ class PaymentProvider(models.Model):
 
     def _nave_get_access_token(self):
         """
-        Retorna el token de acceso Bearer cacheado. Si no existe o ya expiró (con margen de 5 minutos),
-        realiza una petición de autenticación M2M a Auth0 y lo guarda en la base de datos.
+        Retorna el token de acceso Bearer cacheado. Si no existe o está por vencer, realiza una
+        petición de autenticación M2M a Auth0 y lo guarda en la base de datos.
         """
         self.ensure_one()
         now = fields.Datetime.now()
-        margin = timedelta(minutes=5)
+        # Nave devuelve el MISMO token mientras no vence, con su vida restante en `expires_in`
+        # (verificado en producción el 2026-10-08). Pedirlo antes no sirve: con un margen de 5
+        # minutos, cada llamada de los últimos 5 minutos pedía uno, recibía el mismo y lo volvía a
+        # dar por vencido. El margen sólo cubre la demora de la llamada que lo usa (tope de 10 s) y
+        # el desfase de reloj.
+        margin = timedelta(seconds=NAVE_TOKEN_MARGIN_SECONDS)
 
-        # Si el token existe y sigue vigente con un margen de 5 minutos
         if self.nave_access_token and self.nave_token_expiry and (self.nave_token_expiry - margin) > now:
             return self.nave_access_token
 

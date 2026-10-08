@@ -203,7 +203,8 @@ class PosPaymentMethod(models.Model):
             'Accept': 'application/json',
         }
 
-        _logger.info("[pos_nave] Enviando solicitud Smart POS a la terminal %s (Ref: %s)", pos_id, reference)
+        destino = 'al QR' if payment_type == 'static_qr' else 'a la terminal'
+        _logger.info("[pos_nave] Enviando el cobro %s %s (Ref: %s)", destino, pos_id, reference)
 
         timeout = payment_method._nave_timeout('intent')
 

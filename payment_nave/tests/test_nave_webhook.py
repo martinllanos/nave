@@ -116,3 +116,15 @@ class TestNaveWebhook(PaymentHttpCommon):
         self.tx.invalidate_recordset()
         self.assertEqual(self.tx.state, 'done')
         self.assertEqual(self.tx.nave_card_brand, 'VISA')
+
+    def test_05_json_roto_responde_400_sin_error(self):
+        """Un JSON roto es una falla de quien manda el aviso: 400 y advertencia, no error."""
+        with self.assertLogs(CONTROLLER_LOGGER, level='WARNING') as logs:
+            response = self.url_open(
+                '/payment/nave/webhook',
+                data='{"payment_id": ',
+                headers={'Content-Type': 'application/json'},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(self._errores(logs), "Un JSON roto no es un error de Odoo")

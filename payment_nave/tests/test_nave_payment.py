@@ -95,6 +95,39 @@ class TestNaveProvider(PaymentCommon):
         self.assertEqual(token, 'cached_token_xyz',
                          "Debería haberse devuelto el token cacheado sin llamar a Auth0")
 
+    def test_02b_token_por_vencer_se_reusa(self):
+        """Un token al que le quedan 2 minutos se reusa: Nave devolvería el mismo.
+
+        Con el margen anterior de 5 minutos, cada llamada de los últimos 5 minutos pedía un token.
+        """
+        self.nave_provider.write({
+            'nave_access_token': 'token_por_vencer',
+            'nave_token_expiry': fields.Datetime.now() + timedelta(minutes=2),
+        })
+
+        with patch('odoo.addons.payment_nave.models.payment_provider.requests.post') as mock_post:
+            token = self.nave_provider._nave_get_access_token()
+            mock_post.assert_not_called()
+
+        self.assertEqual(token, 'token_por_vencer')
+
+    def test_02c_token_a_segundos_de_vencer_se_renueva(self):
+        """A 10 segundos de vencer ya no alcanza para una llamada: se pide uno nuevo."""
+        self.nave_provider.write({
+            'nave_access_token': 'token_vencido',
+            'nave_token_expiry': fields.Datetime.now() + timedelta(seconds=10),
+        })
+
+        with patch('odoo.addons.payment_nave.models.payment_provider.requests.post') as mock_post:
+            mock_post.return_value = MagicMock(
+                json=MagicMock(return_value={'access_token': 'token_nuevo', 'expires_in': 86400}),
+                raise_for_status=MagicMock(return_value=None),
+            )
+            token = self.nave_provider._nave_get_access_token()
+            mock_post.assert_called_once()
+
+        self.assertEqual(token, 'token_nuevo')
+
     def test_03_api_url_sandbox_vs_prod(self):
         """Verifica que las URLs de API son correctas según el estado del proveedor."""
         self.nave_provider.state = 'test'

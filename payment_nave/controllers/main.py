@@ -29,7 +29,8 @@ class PaymentNaveController(http.Controller):
         try:
             data = request.get_json_data() or json.loads(request.httprequest.data.decode('utf-8'))
         except Exception as e:
-            _logger.error("Error al recibir o parsear el json del webhook: %s", e)
+            # La falla es de quien manda el aviso, no de Odoo: es una advertencia, no un error.
+            _logger.warning("[payment_nave] Webhook con un JSON que no se pudo leer: %s", e)
             return request.make_response("Invalid JSON", [('Content-Type', 'text/plain')], status=400)
 
         _logger.info("Recibido Webhook de Nave: %s", json.dumps(data) if isinstance(data, dict) else data)

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates id="template" xml:space="preserve">
+    <!--
+        Con el QR fijo, "Esperando la tarjeta" confunde y no dice lo importante: el cliente tiene
+        que escanear después de que el cobro exista. Si escanea antes, la billetera le pide el monto
+        y el pago queda fuera del punto de venta, sin aviso (plan de homologación §3.40).
+
+        Para los demás métodos se deja el nodo original ($0), y no una copia del texto del core:
+        así se respeta lo que otro módulo haya puesto en ese lugar.
+    -->
+    <t t-inherit="point_of_sale.PaymentScreenPaymentLines" t-inherit-mode="extension">
+        <xpath expr="//t[contains(@t-elif, 'waitingCard')]/div[hasclass('electronic_status')]" position="replace">
+            <t t-if="line.payment_method_id.use_payment_terminal === 'nave_qr'">
+                <div class="electronic_status">Esperando el escaneo del QR</div>
+            </t>
+            <t t-else="">$0</t>
+        </xpath>
+    </t>
+</templates>

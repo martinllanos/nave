@@ -669,8 +669,11 @@ export class PaymentNave extends PaymentInterface {
     }
 
     /**
-     * Se llama al salir de la pantalla de pago. Sin esto el temporizador seguía vivo
-     * consultando a Nave después de que el cajero abandonó la pantalla.
+     * Hook de PaymentInterface que el core documenta "al cerrar la pantalla de pago", pero que
+     * Odoo 18 no llama nunca: no tiene llamadores en point_of_sale ni en enterprise. Así, tocar
+     * "Regresar" no corta el seguimiento del cobro, y conviene que sea así: en C7c el cliente pagó
+     * con el cajero en productos y el pago se registró igual (plan de homologación §3.38). Si una
+     * versión futura lo llamara, el cobro quedaría sin seguimiento y la línea esperando.
      */
     close() {
         this._abandon_charge();
