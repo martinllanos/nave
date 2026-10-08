@@ -458,6 +458,42 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.38 C7: salir de la pantalla de pago no pierde el cobro (2026-10-08)
+
+`pos_nave 18.0.1.11.1`, POS 1, *Validar automáticamente* apagado. Evidencia en
+`docs/homologacion/evidencias/C7/`.
+
+**Lo que hace Odoo 18 al tocar *Regresar*:** nada con la terminal. El core nunca llama a `close()`
+de la interfaz de pago (no hay ningún llamador en `point_of_sale` ni en enterprise), así que el
+seguimiento del cobro sigue y la línea sigue esperando. Mientras ese cobro esté pendiente, el core
+no deja lanzar otro cobro con terminal **en esa pestaña**, ni siquiera en otra orden ni con Nave QR
+(`paymentTerminalInProgress`, `payment_screen.js:126`).
+
+| Prueba | Resultado |
+|---|---|
+| **C7a** — cobro sin pagar, *Regresar*, volver a *Pago* y cancelar | ✅ La terminal siguió pidiendo la tarjeta. Odoo consultó a Nave 20 veces en 66 s, también desde productos (04:07:56 a 04:09:03 UTC). La línea seguía esperando con *Cancelar*. Nave aceptó la baja y la terminal volvió a reposo |
+| **C7b** — con un cobro pendiente, orden nueva y Nave Point | ✅ *"Ya hay un pago electrónico en progreso"*: el core no crea un segundo cobro |
+| **C7c** — cobro, *Regresar* y pago real de $800 en la terminal | ✅ Nave aprobó a las 04:14:54 y Odoo lo registró en la consulta siguiente (04:14:55), con el cajero en productos. Al volver a *Pago*, la línea estaba en *Pago exitoso*, sin saldo, y quedaba *Validar*. Mastercard crédito terminada en 9537, 1 cuota |
+
+**Lo que eso deja:**
+
+- **Una sola caja no puede chocar dos cobros en la terminal.** El bloqueo es por pestaña: con varias
+  cajas sobre la misma terminal, cada una tiene el suyo y no ve los cobros de la otra. Es C10.
+- **El comentario de `close()` en `payment_nave.js` es falso**: dice que se llama al salir de la
+  pantalla de pago. Hoy no hace daño, y conviene que siga sin llamarse: si el seguimiento se cortara
+  al salir, un pago como el de C7c no se registraría. Corregir el comentario en el próximo cambio
+  de `pos_nave`.
+- **El webhook del pago volvió a responder 500** (04:14:54 y 04:16:03), igual que en los demás cobros
+  presenciales: consulta 6 de `tasks/reunion_tecnica_nave.md`.
+- **El cupón vuelve a mezclar crédito y débito:** *"MASTERCARD CREDIT 9537"* en el detalle y
+  *"Debit Mastercard"* al pie, con la terminal mostrando *"MASTERCARD Crédito"*. Es la misma
+  inconsistencia del cupón de C3, ahora en un pago aprobado.
+
+**Bajas que no se explicaron:** entre las 04:04 y las 04:07, tres cobros a la terminal quedaron dados
+de baja a los 11, 4 y 4 s de crearse, sin motivo en la respuesta de Nave. Antes, a las 03:56, hubo
+un cobro a Nave QR cancelado desde Odoo; Nave aceptó la baja, pero fue una exploración y no una
+prueba de H7.
+
 ### 3.37 Reprueba de C4: cancelar desde Odoo da de baja el cobro en la terminal (2026-10-08)
 
 Corrección en `send-the-reason-nave-accepts-when-cancelling`, `pos_nave 18.0.1.11.1`. La baja manda
@@ -1925,7 +1961,7 @@ deciden cómo se escribe el fix de B11.
 | C4 | Cancelación desde Odoo | Iniciar cobro → botón Cancel | `DELETE` a Nave y la **terminal vuelve a reposo**. Ojo: `send_payment_cancel` retorna `true` siempre, incluso si el DELETE falló (`payment_nave.js:185-190`) | 🔴 2026-10-07: Nave rechaza toda baja desde Odoo con `400 Invalid input reason`: exige una descripción fija por código (`disabled from SAAS`) y Odoo manda una libre. La terminal sigue cobrando. §3.36. ✅ 2026-10-08, `18.0.1.11.1`: la baja funciona con la terminal pidiendo la tarjeta y con el cliente eligiendo cuotas; si el cliente toca *volver*, Nave da de baja la intención y el POS lo informa solo. §3.37 |
 | C5 | Cancelación desde la terminal | Iniciar cobro → cancelar en el equipo | Nave notifica `DISABLED` con `manual_disabled_by_user`. **Se espera loop infinito** (B4) |⚠️ 2026-10-07: la terminal vuelve a reposo ("Ingresá el monto a cobrar") y el POS cierra la línea como reintentable. Pero el motivo que se le muestra al cajero es el mismo código que en C6, así que **no se distingue una cancelación de un vencimiento**. §3.29. ✅ Reprueba con 18.0.1.9.0: *"El cobro ya no está disponible. Generá un cobro nuevo."*, sin código en la explicación. Nave no informa el motivo de la baja en el 400. §3.31 |
 | C6 | Expiración de la intención | Iniciar cobro y no tocar nada 300 s | Nave marca `EXPIRED`. **Se espera loop infinito** (B4) |⚠️ 2026-10-07: **no hay loop infinito**. Nave no manda `EXPIRED` sino `DISABLED` con `payment_request_is_disabled`: la terminal da de baja la intención. La línea queda reintentable y no se contabiliza nada, pero el cajero lee el código crudo. §3.28. ✅ Reprueba con 18.0.1.9.0: esta vez Nave respondió `EXPIRED` a los 303 s y el cajero leyó *"Cobro expirado"*. Un vencimiento llega a veces como `EXPIRED` y a veces como baja; el aviso es correcto en los dos casos. §3.31 |
-| C7 | Salir de la pantalla de pago | Iniciar cobro → botón Back | La intención queda viva: **la terminal sigue cobrable**. No hay `close()` implementado | ⬜ |
+| C7 | Salir de la pantalla de pago | Iniciar cobro → botón Back | La intención queda viva: **la terminal sigue cobrable**. No hay `close()` implementado | ✅ 2026-10-08: el core no llama a `close()` y el cobro sigue. Desde productos, una cancelación posterior funciona y un pago real se registra igual. Un segundo cobro con terminal en la misma pestaña lo bloquea el core. §3.38 |
 | C8 | Corte de red durante el polling 🔴 | Iniciar cobro y cortar la conexión de Odoo | **Se espera spinner infinito sin diálogo de error** (B4). Verificar que la única salida es "Force done" | 🔴 2026-10-07: con un corte que falla al instante, el POS da el cobro por fallido a los ~9 s mientras la terminal sigue cobrando; Nave aprobó $150 y Odoo quedó en *"Volver a intentar"*, camino directo a un cobro doble. Con un corte que cuelga la consulta, el POS espera sin límite ni aviso. §3.34. ✅ Reprueba con 18.0.1.11.0: el corte ya no termina el cobro, el POS avisa y registra el pago al volver la conexión, y *Volver a intentar* encontró los $150 del pedido 104 sin cobrar de nuevo. §3.35 |
 | C9 | "Force done" con pago rechazado | Rechazar en la terminal y presionar Force done | La venta se cierra como cobrada sin cobro real. **Hallazgo a documentar y mitigar** | 🔴 2026-10-07: después de un rechazo el botón no aparece, pero mientras se espera la tarjeta *Forzar terminación* deja la línea en *"Pago exitoso"* con *Validar* habilitado, sin cobro y con la terminal todavía cobrable. Unos 3 min después, la baja devuelve la línea a reintentable. §3.32. ✅ Reprueba con 18.0.1.10.1: el botón consulta a Nave; forzar mientras espera no da nada por cobrado, un rechazo da un solo aviso y sin conexión se pregunta al cajero sin que el polling le gane. Pendiente sólo el forzado sobre un cobro aprobado. §3.33 |
 | C10 | Terminal ocupada | Lanzar un cobro con otro en curso | `device_already_on_payment_flow` (`doc_point.md` §6). Verificar el mensaje al cajero. **Caso real a cubrir** (2026-10-07): en una farmacia, 3 o 4 cajas (POS) comparten un solo Nave Point. Hoy el módulo asume una terminal por POS; probar dos cajas cobrando a la vez con la misma terminal, junto con C7 | ⬜ |
