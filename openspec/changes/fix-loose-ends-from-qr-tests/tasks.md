@@ -2,7 +2,7 @@
 
 ## 1. Lo que ve el cajero
 
-- [ ] 1.1 Agregar a `pos_nave/static/src/app/` una plantilla que extienda
+- [x] 1.1 Agregar a `pos_nave/static/src/app/` una plantilla que extienda
       `point_of_sale.PaymentScreenPaymentLines` y, en el estado `waitingCard`, muestre *"Esperando el
       escaneo del QR"* cuando el método es `nave_qr`, y el texto del core en los demás casos.
       Verificar: con el POS cargado, la plantilla compila sin errores en la consola. La prueba en el POS
@@ -26,7 +26,7 @@
 - [x] 3.2 Correr las suites de `payment_nave` y `pos_nave`, más flake8 y bandit según
       `.agent/rules.md` §6. Verificar: 0 fallos, 0 errores de lint y 0 hallazgos de severidad media o
       superior.
-- [ ] 3.3 Desplegar, verificar versiones y hashes en el contenedor, y probar en el POS:
+- [x] 3.3 Desplegar, verificar versiones y hashes en el contenedor, y probar en el POS:
       - con *Nave QR*, la línea dice *"Esperando el escaneo del QR"*;
       - con *Nave Point*, sigue diciendo *"Esperando la tarjeta"*.
       Se cancelan los dos cobros, sin pagar. Registrar el resultado en el plan (§3.40).

@@ -497,6 +497,19 @@ las aceptó.
 - **Los dos pagos sueltos** ($294) quedaron en la cuenta del comercio. Si hay que devolverlos, es
   desde el panel de Nave.
 
+**Corregido en `fix-loose-ends-from-qr-tests`** (`payment_nave 18.0.1.12.3`, `pos_nave 18.0.1.11.2`,
+verificado en producción el 2026-10-08):
+
+- con *Nave QR* la línea en espera dice *"Esperando el escaneo del QR"*, y con *Nave Point* sigue
+  diciendo *"Esperando la tarjeta"* (`8_espera_qr_texto_nuevo.png`, `9_espera_terminal_sin_cambios.png`);
+- el log del envío dice *"Enviando el cobro al QR …"* o *"… a la terminal …"*;
+- el token se reusa hasta 30 s antes de vencer: Nave devuelve el mismo token mientras no vence,
+  comprobado en producción con 84.249 s restantes (`expires_in: 84250`, mismo token);
+- el JSON roto del webhook (D2c) queda como advertencia;
+- el comentario de `close()` ya no dice que el core lo llama.
+
+Las dos cancelaciones de la prueba, QR y terminal, las aceptó Nave sin error.
+
 ### 3.39 El webhook acusa los avisos que no son del sitio (2026-10-08)
 
 Corrección en `acknowledge-webhooks-that-are-not-ours`, `payment_nave 18.0.1.12.2`. Verificado en
@@ -517,7 +530,7 @@ producción, contra la URL registrada en Nave. Evidencia en `docs/homologacion/e
   500 para que Nave reintente. Antes quedaba en **error** con un 200: nadie la volvía a revisar.
 - El procesamiento corre dentro de un savepoint, así que un 500 no deja el aviso aplicado a medias.
 
-**Pendiente menor:** el JSON roto (D2c) se registra como error, aunque la falla es de quien envía.
+**Pendiente menor:** el JSON roto (D2c) se registraba como error. Corregido en §3.40.
 
 **Para la reunión (consulta 6):** que un 200 corta los reintentos de Nave queda confirmado en la
 práctica. Sigue abierta la pregunta de si se puede tener una URL de notificación por medio de cobro.
@@ -2064,7 +2077,7 @@ deciden cómo se escribe el fix de B11.
 | ID | Caso | Pasos | Resultado esperado | Estado |
 |---|---|---|---|---|
 | D1c | Preflight OPTIONS | `curl -X OPTIONS .../payment/nave/webhook` | 200 con headers CORS. ✅ **verificado: responde 200** | ✅ |
-| D2c | JSON inválido | POST con body roto | 400 "Invalid JSON" | ✅ 2026-10-08, producción: 400. El log lo registra como **error** aunque la falla es de quien envía; bajarlo a advertencia queda pendiente. §3.39 |
+| D2c | JSON inválido | POST con body roto | 400 "Invalid JSON" | ✅ 2026-10-08, producción: 400. Desde `payment_nave 18.0.1.12.3` se registra como advertencia. §3.39 y §3.40 |
 | D3c | Campos faltantes | POST sin `payment_id` | 400 | ✅ 2026-10-08, producción: 400 con la advertencia *"Webhook omitido: faltan campos clave"*. §3.39 |
 | D4c | Referencia inexistente | POST con `external_payment_id` inventado | **500 + Nave reintenta en loop**. Evaluar responder 200 ante fallos permanentes | ✅ 2026-10-08, `payment_nave 18.0.1.12.2`: 200 con una línea de información, sin error. Un pago real del POS recibió un solo aviso y Nave no reintentó. §3.39 |
 | D5c | Webhook duplicado | Enviar el mismo webhook dos veces | Idempotente: sin doble asiento | ⬜ |
