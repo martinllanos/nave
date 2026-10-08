@@ -26,7 +26,7 @@
 - [x] 2.2 Correr las suites de `payment_nave` y `pos_nave`, más flake8 y bandit según
       `.agent/rules.md` §6. Verificar: 0 fallos, 0 errores de lint y 0 hallazgos de severidad media o
       superior.
-- [ ] 2.3 Desplegar y verificar en el servidor:
+- [x] 2.3 Desplegar y verificar en el servidor:
       - un `curl` con una referencia inventada responde 200 (D4c);
       - el próximo cobro presencial recibe un solo aviso, con 200.
       Registrar el resultado en el plan: fila D4c y el hallazgo del webhook en §5.1.

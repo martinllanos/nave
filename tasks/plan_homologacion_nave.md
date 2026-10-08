@@ -458,6 +458,31 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.39 El webhook acusa los avisos que no son del sitio (2026-10-08)
+
+Corrección en `acknowledge-webhooks-that-are-not-ours`, `payment_nave 18.0.1.12.2`. Verificado en
+producción, contra la URL registrada en Nave. Evidencia en `docs/homologacion/evidencias/D4c/`.
+
+| Prueba | Resultado |
+|---|---|
+| **D4c** — `curl` con una referencia inventada | ✅ 200. El log anota *"Aviso de Nave que no corresponde a ninguna transacción del sitio… se acusa sin aplicar"*, sin error |
+| **D2c** — JSON roto | ✅ 400 |
+| **D3c** — sin `payment_id` | ✅ 400, con advertencia |
+| **Cobro presencial real**, $150, orden 114 | ✅ Nave avisó una sola vez (18:34:43 UTC) y Odoo respondió 200. En los 10 minutos siguientes no hubo reintentos, cuando antes llegaban a los ~1 y ~7 minutos. El POS registró el pago por su consulta un segundo después |
+
+**Lo que cambió:**
+
+- Un aviso que no corresponde a ninguna transacción del sitio se acusa con 200, como hace el core
+  con Stripe. Nave manda a la misma URL los pagos de todo el comercio, también los de la terminal.
+- Si la consulta del pago a Nave falla, la transacción online queda como estaba y el webhook responde
+  500 para que Nave reintente. Antes quedaba en **error** con un 200: nadie la volvía a revisar.
+- El procesamiento corre dentro de un savepoint, así que un 500 no deja el aviso aplicado a medias.
+
+**Pendiente menor:** el JSON roto (D2c) se registra como error, aunque la falla es de quien envía.
+
+**Para la reunión (consulta 6):** que un 200 corta los reintentos de Nave queda confirmado en la
+práctica. Sigue abierta la pregunta de si se puede tener una URL de notificación por medio de cobro.
+
 ### 3.38 C7: salir de la pantalla de pago no pierde el cobro (2026-10-08)
 
 `pos_nave 18.0.1.11.1`, POS 1, *Validar automáticamente* apagado. Evidencia en
@@ -2000,9 +2025,9 @@ deciden cómo se escribe el fix de B11.
 | ID | Caso | Pasos | Resultado esperado | Estado |
 |---|---|---|---|---|
 | D1c | Preflight OPTIONS | `curl -X OPTIONS .../payment/nave/webhook` | 200 con headers CORS. ✅ **verificado: responde 200** | ✅ |
-| D2c | JSON inválido | POST con body roto | 400 "Invalid JSON" | ⬜ |
-| D3c | Campos faltantes | POST sin `payment_id` | 400 | ⬜ |
-| D4c | Referencia inexistente | POST con `external_payment_id` inventado | **500 + Nave reintenta en loop**. Evaluar responder 200 ante fallos permanentes | ⬜ |
+| D2c | JSON inválido | POST con body roto | 400 "Invalid JSON" | ✅ 2026-10-08, producción: 400. El log lo registra como **error** aunque la falla es de quien envía; bajarlo a advertencia queda pendiente. §3.39 |
+| D3c | Campos faltantes | POST sin `payment_id` | 400 | ✅ 2026-10-08, producción: 400 con la advertencia *"Webhook omitido: faltan campos clave"*. §3.39 |
+| D4c | Referencia inexistente | POST con `external_payment_id` inventado | **500 + Nave reintenta en loop**. Evaluar responder 200 ante fallos permanentes | ✅ 2026-10-08, `payment_nave 18.0.1.12.2`: 200 con una línea de información, sin error. Un pago real del POS recibió un solo aviso y Nave no reintentó. §3.39 |
 | D5c | Webhook duplicado | Enviar el mismo webhook dos veces | Idempotente: sin doble asiento | ⬜ |
 | D6c | Webhook fuera de orden | `APPROVED` y después `PENDING` | La tx no debe retroceder de `done` | ⬜ |
 | D7c | Reintentos de Nave | Devolver 500 en el primer intento | Nave reintenta a los 10 s y concilia en el segundo | ⬜ |
@@ -2068,9 +2093,9 @@ Lo primero que se presenta a Nave. Lo que queda afuera no se descarta: se homolo
 | Nave Point con tarjeta | C0 a C9, C12, C16 | ✅ |
 | Nave Point con *Código QR* en la terminal | C2 con QR | ⬜ La terminal lo ofrece; no se probó desde estas correcciones |
 | Nave QR fijo | H1 a H8, H10 | ⬜ |
-| Webhook de los pagos del POS | — | 🔴 Responde 500 y Nave reintenta (consulta 6 de la reunión) |
+| Webhook de los pagos del POS | — | ✅ 2026-10-08: responde 200 y Nave no reintenta (§3.39) |
 | Seguridad del webhook | E1c a E3c | ⬜ La restricción de host de `payment_check_url` está en el código; falta la prueba |
-| Robustez del webhook | D2c a D6c | ⬜ |
+| Robustez del webhook | D2c a D6c | D2c a D4c ✅; D5c y D6c ⬜ |
 | Contabilidad y cierre de caja | F1 a F4, C15 | ⬜ |
 | Calidad | E0.1 a E0.4, E4c | ✅ en cada commit |
 

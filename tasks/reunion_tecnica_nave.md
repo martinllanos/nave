@@ -164,8 +164,9 @@ reintenta: en una misma venta vimos tres entregas en unos 7 minutos.
 
 - Respuesta:
 
-**Según la respuesta:** dejamos de generar errores falsos en el log y reintentos innecesarios en su
-plataforma.
+**Ya resuelto de nuestro lado (2026-10-08, `plan_homologacion_nave.md` §3.39):** respondemos 200 a
+los avisos que no son del sitio, y vimos que eso corta los reintentos. La pregunta 2 quedó
+contestada en la práctica; la 1 y la 3 siguen abiertas.
 
 ---
 
