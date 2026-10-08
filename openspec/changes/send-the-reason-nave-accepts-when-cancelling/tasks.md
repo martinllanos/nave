@@ -24,7 +24,7 @@
 - [x] 3.2 Correr las suites de `payment_nave` y `pos_nave`, más flake8 y bandit según
       `.agent/rules.md` §6. Verificar: 0 fallos, 0 errores de lint y 0 hallazgos de severidad media o
       superior.
-- [ ] 3.3 Desplegar y probar con la terminal, sin pagar: A, cancelar con la terminal pidiendo la
+- [x] 3.3 Desplegar y probar con la terminal, sin pagar: A, cancelar con la terminal pidiendo la
       tarjeta; B, cancelar con el cliente en *"Elegí la cantidad de cuotas"*; C, tocar *volver* en
       la terminal y cancelar. Verificar: en A la terminal vuelve a reposo y no hay aviso; en B y C
       queda registrado qué respondió Nave. Registrar los resultados en el plan como reprueba de C4.

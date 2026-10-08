@@ -90,6 +90,10 @@ llegan:
   nunca de intenciones. La documentación describe una notificación de intención con
   `disabled_reason`.
 
+**Un caso con causa conocida** (`plan_homologacion_nave.md` §3.37): el 2026-10-08 el cliente tocó
+*volver* en la terminal, en *"Elegí cómo querés cobrar"*. La intención `d0081b39…` quedó dada de
+baja, el motivo esperable es `manual_disabled_by_user` y la consulta respondió igual, sin motivo.
+
 **Preguntas:**
 
 1. ¿Por qué vía se informa el motivo de una baja? ¿Hay una consulta que lo devuelva?

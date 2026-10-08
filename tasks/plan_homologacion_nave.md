@@ -458,6 +458,36 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.37 Reprueba de C4: cancelar desde Odoo da de baja el cobro en la terminal (2026-10-08)
+
+Corrección en `send-the-reason-nave-accepts-when-cancelling`, `pos_nave 18.0.1.11.1`. La baja manda
+el par que Nave acepta (`disabled_from_saas` / `disabled from SAAS`) y, si igual la rechaza por el
+motivo, la repite sin cuerpo. Cuando falla, el log registra el código HTTP y la respuesta de Nave.
+Sin dinero. Evidencia en `docs/homologacion/evidencias/C4/reprueba_18.0.1.11.1/`.
+
+| Prueba | Resultado |
+|---|---|
+| **A** — *Cancelar* en Odoo con la terminal pidiendo la tarjeta | ✅ Nave aceptó la baja al primer intento (23:06:26). La terminal volvió a reposo y el POS no mostró aviso |
+| **B** — *Cancelar* en Odoo con el cliente en *"Elegí la cantidad de cuotas"* | ✅ Nave aceptó la baja (23:13:11) aunque el cliente estaba operando la terminal. La terminal volvió a reposo, sin aviso. Antes, *Volver a intentar* consultó la intención anterior (`DISABLED`) y recién después creó la nueva |
+| **C** — tocar *volver* en la terminal y después *Cancelar* en Odoo | ✅ No llegó a cancelarse: *volver* en la pantalla *"Elegí cómo querés cobrar"* dio de baja la intención en Nave. El POS lo detectó en la consulta siguiente y mostró *"Cobro dado de baja"*, con *Volver a intentar* en lugar de *Cancelar*. La intención `d0081b39…` se creó a las 03:48:50 UTC y quedó `DISABLED` a las 03:49:22. Odoo no mandó ninguna baja |
+
+**El caso C no llega a la cancelación:** si el cliente sale del cobro en la terminal, Nave da de
+baja la intención y el POS lo informa solo. El cajero ya no tiene *Cancelar*, sólo *Volver a
+intentar*, y eso pasa por la consulta de la intención anterior (§3.35).
+
+**Distinto de la corrida 2 de §3.35:** allí *volver* no dio de baja la intención; aquella vez la
+terminal acababa de recibir el cobro y la pantalla en la que se tocó no consta. La de hoy es la
+primera, la de elegir el medio de cobro. Si vuelve a aparecer una intención que sigue viva después
+de *volver*, *Cancelar* en Odoo ahora sí la da de baja (pruebas A y B).
+
+**El motivo de la baja sigue sin llegar:** sabemos que la causa fue *volver* en la terminal (el
+motivo publicado sería `manual_disabled_by_user`), y Nave igual respondió sólo
+`payment_request_is_disabled`. El cajero vio *"El cobro ya no está disponible"*. Es la consulta 3 de
+`tasks/reunion_tecnica_nave.md`.
+
+**Para el bloque H:** la terminal siempre ofrece *Tarjetas* o *Código QR* al recibir el cobro. Estas
+pruebas usaron *Tarjetas*; el QR de la terminal queda por probar junto con Nave QR.
+
 ### 3.36 🔴 C4: cancelar desde Odoo nunca funcionó (2026-10-07)
 
 Prueba A: cobro de $246,90 a la terminal y, sin tocar el equipo, *Cancelar* en Odoo. Evidencia en
@@ -1411,6 +1441,10 @@ dispositivo entregársela, así que el ciclo llega al tope sin novedad. Todo el 
 consistente con el catálogo de errores, que sólo admite baja para `payment_link, dynamic_qr,
 static_qr`.
 
+> **Corregido el 2026-10-07 (§3.36 y §3.37):** la explicación era equivocada. El 400 no venía del tipo
+> de intención sino de la descripción del motivo, que Nave exige fija. Con `disabled from SAAS`, la
+> baja de una intención `smart_pos` funciona.
+
 **Arreglado (`2ccc47d`)**: el cliente ahora lee la respuesta y, si Nave rechazó la baja, avisa que el
 cobro puede seguir activo en la terminal y hay que cancelarlo desde el equipo. Se sigue devolviendo
 `true` a propósito: con `false` el core deja la línea en `waitingCard` con el polling ya detenido, y
@@ -1888,7 +1922,7 @@ deciden cómo se escribe el fix de B11.
 | C1 | Contrato de estados 🔴 | Cobrar y capturar la respuesta cruda de `GET /api/payment_requests/{id}` | Documentar la forma exacta de `status` y el catálogo completo de valores. **Todo el polling depende de una suposición del código** (`payment_nave.js:124`: *"suponiendo estructura {status:{name:...}}"*) | ✅ 2026-10-05: forma capturada en §3.20. La suposición es correcta en la intención, pero **no** dentro de `payment_attempts` |
 | C2 | Cobro aprobado con chip | Orden POS → Tarjeta → insertar chip → aprobar | Línea `done`, orden validada, `transaction_id` guardado |✅ 2026-10-06, POS 1/0001: línea cobrada, orden facturada (`FA-C 00001-00000004`) y `transaction_id` guardado. Se pagó por **NFC**, no por chip. §3.27 |
 | C3 | Cobro rechazado | Tarjeta de rechazo en la terminal | Diálogo con el `reason_code`, línea en `retry`, el cajero puede reintentar |🔴 2026-10-07: la línea queda reintentable y no se contabiliza nada, pero Nave devuelve `BLOCKED` y el cajero lee *"Nave bloqueó la operación por motivos de seguridad. Contactá a Nave antes de reintentar"* por una tarjeta sin fondos. §3.30. ⚠️ Reprueba con 18.0.1.8.0: ya no hay alarma de seguridad, pero el aviso muestra el motivo de la intención (*"payment retries limit reached"*) en vez del de la tarjeta. ✅ Reprueba con 18.0.1.9.0: *"La tarjeta no tiene fondos suficientes. Podés reintentar o cobrar con otro medio."*, con el código sólo en el bloque de soporte. §3.31 |
-| C4 | Cancelación desde Odoo | Iniciar cobro → botón Cancel | `DELETE` a Nave y la **terminal vuelve a reposo**. Ojo: `send_payment_cancel` retorna `true` siempre, incluso si el DELETE falló (`payment_nave.js:185-190`) | 🔴 2026-10-07: Nave rechaza toda baja desde Odoo con `400 Invalid input reason`: exige una descripción fija por código (`disabled from SAAS`) y Odoo manda una libre. La terminal sigue cobrando. §3.36 |
+| C4 | Cancelación desde Odoo | Iniciar cobro → botón Cancel | `DELETE` a Nave y la **terminal vuelve a reposo**. Ojo: `send_payment_cancel` retorna `true` siempre, incluso si el DELETE falló (`payment_nave.js:185-190`) | 🔴 2026-10-07: Nave rechaza toda baja desde Odoo con `400 Invalid input reason`: exige una descripción fija por código (`disabled from SAAS`) y Odoo manda una libre. La terminal sigue cobrando. §3.36. ✅ 2026-10-08, `18.0.1.11.1`: la baja funciona con la terminal pidiendo la tarjeta y con el cliente eligiendo cuotas; si el cliente toca *volver*, Nave da de baja la intención y el POS lo informa solo. §3.37 |
 | C5 | Cancelación desde la terminal | Iniciar cobro → cancelar en el equipo | Nave notifica `DISABLED` con `manual_disabled_by_user`. **Se espera loop infinito** (B4) |⚠️ 2026-10-07: la terminal vuelve a reposo ("Ingresá el monto a cobrar") y el POS cierra la línea como reintentable. Pero el motivo que se le muestra al cajero es el mismo código que en C6, así que **no se distingue una cancelación de un vencimiento**. §3.29. ✅ Reprueba con 18.0.1.9.0: *"El cobro ya no está disponible. Generá un cobro nuevo."*, sin código en la explicación. Nave no informa el motivo de la baja en el 400. §3.31 |
 | C6 | Expiración de la intención | Iniciar cobro y no tocar nada 300 s | Nave marca `EXPIRED`. **Se espera loop infinito** (B4) |⚠️ 2026-10-07: **no hay loop infinito**. Nave no manda `EXPIRED` sino `DISABLED` con `payment_request_is_disabled`: la terminal da de baja la intención. La línea queda reintentable y no se contabiliza nada, pero el cajero lee el código crudo. §3.28. ✅ Reprueba con 18.0.1.9.0: esta vez Nave respondió `EXPIRED` a los 303 s y el cajero leyó *"Cobro expirado"*. Un vencimiento llega a veces como `EXPIRED` y a veces como baja; el aviso es correcto en los dos casos. §3.31 |
 | C7 | Salir de la pantalla de pago | Iniciar cobro → botón Back | La intención queda viva: **la terminal sigue cobrable**. No hay `close()` implementado | ⬜ |
