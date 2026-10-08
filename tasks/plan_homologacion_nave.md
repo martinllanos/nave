@@ -458,6 +458,40 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.40 Nave QR fijo: cobro real con billetera (2026-10-08)
+
+`pos_nave 18.0.1.11.1`, método *Nave QR* con el `pos_id` del *QR 1* del local. Evidencia en
+`docs/homologacion/evidencias/H/`.
+
+| Prueba | Resultado |
+|---|---|
+| **H6** — dejar vencer el cobro | ✅ `EXPIRED` a los 5 min justos (19:07:00 → 19:12:03 UTC). *"Cobro expirado"*, la línea queda para reintentar y no hay loop |
+| **Pagos sin cobro activo** | Dos pagos de $147 con Belo, uno al *QR 1* y otro al *QR 2*. La billetera **pidió el monto**: no había un cobro de Odoo en ese QR, porque en el *QR 1* se escaneó antes de que existiera y el *QR 2* no lo usa Odoo. Quedaron como transferencias sueltas al comercio y Nave **no avisó nada**. Odoo no se enteró, como corresponde |
+| **H2 a H5** — cobro real, $147, POS 1/0014 | ✅ Con *"Esperando"* en Odoo, Belo leyó el *QR 1* y mostró los **$147 ya cargados**. Nave aprobó a las 19:36:44, el webhook respondió 200 sin reintentos, y el POS lo registró en la consulta de ese mismo segundo. Factura `FA-C 00001-00000017`, *"Pagado usando Nave QR"* |
+
+**Lo que quedó registrado en la línea de pago:** modo `wallet`, billetera *"bind pago"* (el
+procesador que usa Belo, no el nombre de la app), cupón `SMI542294163` y autorización. Sin marca ni
+últimos cuatro, como era de esperar en un pago con billetera.
+
+**Reintentos:** cada *Volver a intentar* consultó primero la intención anterior, la encontró vencida y
+recién después creó la nueva. Las tres intenciones llevaron la misma referencia de la línea, y Nave
+las aceptó.
+
+**Hallazgos:**
+
+- **El cajero tiene que esperar a ver el cobro en Odoo antes de que el cliente escanee.** Si escanea
+  antes, la billetera pide el monto y el pago queda fuera del cobro, sin aviso. Conviene decirlo en
+  la pantalla y en el manual. El texto *"Esperando la tarjeta"*, que es del core, confunde con un QR;
+  el usuario propone *"Esperando el escaneo del QR"*.
+- **Nave acredita el neto.** Galicia avisó *"Cobraste $145,57 con Nave"* por los $147: $1,43 de
+  comisión. Odoo registra $147 en el diario Banco. Va al bloque F (F4, total contra monto cobrado).
+- **Tokens pedidos de más.** Entre 19:10 y 19:12, cada consulta pidió un token nuevo (~25 en un
+  minuto y medio). Hipótesis: con menos de 5 minutos de vida, Nave devuelve el mismo token con lo que
+  le queda, y el margen de 5 minutos de `_nave_get_access_token` lo sigue dando por vencido.
+- **El log del QR dice *"Enviando solicitud Smart POS a la terminal"*.**
+- **Los dos pagos sueltos** ($294) quedaron en la cuenta del comercio. Si hay que devolverlos, es
+  desde el panel de Nave.
+
 ### 3.39 El webhook acusa los avisos que no son del sitio (2026-10-08)
 
 Corrección en `acknowledge-webhooks-that-are-not-ours`, `payment_nave 18.0.1.12.2`. Verificado en
@@ -2009,16 +2043,16 @@ deciden cómo se escribe el fix de B11.
 
 | ID | Caso | Pasos | Resultado esperado | Estado |
 |---|---|---|---|---|
-| H1 | Alta y descarga del QR | *Nave > Negocios > elegí el local > Descargar* (§3.9.d). Ojo: con Nave Point habilitado **no llega el kit POP impreso** | Se obtiene el QR y su `pos_id` (`doc_qr.md` §1) | ⬜ |
-| H2 | Crear intención | Orden POS → método "Nave QR" | `POST /static_qr` con `qr_amount: "close"` y `amount.value` string de 2 decimales | ⬜ |
-| H3 | Pago simulado aprobado | Llamar al endpoint de simulación | Webhook llega, línea `done`, orden validada | ⬜ |
-| H4 | Billetera usada | Ídem H3 | `wallet.name` (ej. `"mercado pago"`, `"modo"`) queda registrado para conciliación | ⬜ |
-| H5 | Pago con billetera real | Escanear el QR físico desde una app | Mismo resultado que H3 | ⬜ |
-| H6 | Expiración | Crear intención y esperar el `duration_time` | `EXPIRED` manejado sin loop (depende de B11/B4) | ⬜ |
-| H7 | Cancelar intención | Cancelar desde el POS | `DELETE /api/payment_requests/{id}`, el QR deja de cobrar | ⬜ |
+| H1 | Alta y descarga del QR | *Nave > Negocios > elegí el local > Descargar* (§3.9.d). Ojo: con Nave Point habilitado **no llega el kit POP impreso** | Se obtiene el QR y su `pos_id` (`doc_qr.md` §1) | ✅ 2026-10-08: el cartel del *QR 1* (*"Be onlyone Jujuy – QR 1"*) y su `pos_id` vienen del portal y del archivo `POS_ID-<CUIT>.xlsx`. §3.40 |
+| H2 | Crear intención | Orden POS → método "Nave QR" | `POST /static_qr` con `qr_amount: "close"` y `amount.value` string de 2 decimales | ✅ 2026-10-08: Nave registra la intención como `static_qr` con `amount_type: close` y $147,00. §3.40 |
+| H3 | Pago simulado aprobado | Llamar al endpoint de simulación | Webhook llega, línea `done`, orden validada | ➖ No hace falta: se probó con un pago real (H5) |
+| H4 | Billetera usada | Ídem H3 | `wallet.name` (ej. `"mercado pago"`, `"modo"`) queda registrado para conciliación | ✅ 2026-10-08: la línea guarda el modo `wallet`, la billetera (*"bind pago"*, el procesador de Belo), el cupón y la autorización. §3.40 |
+| H5 | Pago con billetera real | Escanear el QR físico desde una app | Mismo resultado que H3 | ✅ 2026-10-08, POS 1/0014: Belo mostró los $147 ya cargados, Nave aprobó y Odoo lo registró en la consulta siguiente. Factura `FA-C 00001-00000017`. §3.40 |
+| H6 | Expiración | Crear intención y esperar el `duration_time` | `EXPIRED` manejado sin loop (depende de B11/B4) | ✅ 2026-10-08: `EXPIRED` a los 5 min (19:07:00 → 19:12:03 UTC). *"Cobro expirado"*, línea reintentable, sin loop. §3.40 |
+| H7 | Cancelar intención | Cancelar desde el POS | `DELETE /api/payment_requests/{id}`, el QR deja de cobrar | ✅ 2026-10-08, exploratorio: Nave aceptó la baja de una intención `static_qr` desde Odoo (03:56 UTC). Un QR impreso no tiene pantalla que vuelva a reposo |
 | H8 | Errores propios de QR | Forzar la condición | `ERROR_ENCODE_DYNAMIC_QR` y `NO_GATEWAYS_AVAILABLE` con mensaje claro al cajero (`doc_qr.md` §9) | ⬜ |
 | H9 | Devolución | Devolver un pago QR aprobado | `DELETE /api/payments/{payment_id}` → `CANCELLING` → estado final asincrónico | ⬜ |
-| H10 | Path de auth | Capturar el request de token | `doc_qr.md` §2 usa `m2ms`, el código usa `m2msPrivate` (N3) | ⬜ |
+| H10 | Path de auth | Capturar el request de token | `doc_qr.md` §2 usa `m2ms`, el código usa `m2msPrivate` (N3) | ✅ 2026-10-08: en producción el token sale de `m2msPrivate` y el QR cobra con él |
 
 ### Bloque D — Webhooks y resiliencia
 
@@ -2092,7 +2126,7 @@ Lo primero que se presenta a Nave. Lo que queda afuera no se descarta: se homolo
 | Checkout online | A1 a A13, A16 a A18 | ✅ |
 | Nave Point con tarjeta | C0 a C9, C12, C16 | ✅ |
 | Nave Point con *Código QR* en la terminal | C2 con QR | ⬜ La terminal lo ofrece; no se probó desde estas correcciones |
-| Nave QR fijo | H1 a H8, H10 | ⬜ |
+| Nave QR fijo | H1 a H8, H10 | ✅ H1, H2, H4 a H7 y H10 (§3.40). Falta H8, los errores propios del QR |
 | Webhook de los pagos del POS | — | ✅ 2026-10-08: responde 200 y Nave no reintenta (§3.39) |
 | Seguridad del webhook | E1c a E3c | ⬜ La restricción de host de `payment_check_url` está en el código; falta la prueba |
 | Robustez del webhook | D2c a D6c | D2c a D4c ✅; D5c y D6c ⬜ |
