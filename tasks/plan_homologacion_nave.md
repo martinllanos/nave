@@ -473,6 +473,11 @@ hay que reportárselo a Nave con esta evidencia.
 procesador que usa Belo, no el nombre de la app), cupón `SMI542294163` y autorización. Sin marca ni
 últimos cuatro, como era de esperar en un pago con billetera.
 
+**El ticket del POS** imprime *"Billetera: bind pago"*, el cupón y la autorización
+(`7_ticket_pos.png`). El cliente pagó con Belo y lee *"bind pago"*: el nombre que manda Nave es el
+del procesador, no el de la app. Es lo que informa Nave, así que no se corrige en Odoo; se puede
+consultar en la reunión si hay un campo con el nombre de la billetera que vio el cliente.
+
 **Reintentos:** cada *Volver a intentar* consultó primero la intención anterior, la encontró vencida y
 recién después creó la nueva. Las tres intenciones llevaron la misma referencia de la línea, y Nave
 las aceptó.
