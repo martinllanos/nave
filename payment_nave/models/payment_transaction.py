@@ -563,9 +563,16 @@ class PaymentTransaction(models.Model):
             response.raise_for_status()
             payment_data = response.json()
         except requests.exceptions.RequestException as e:
-            _logger.error("Error al consultar estado de pago en Nave: %s", e)
-            self._set_error(_("Error al consultar el estado seguro del pago en la API de Nave."))
-            return
+            # Una falla de comunicación no dice nada del pago, que pudo haberse cobrado. Antes se
+            # cerraba la transacción en error y el webhook respondía 200: Nave no reintentaba y la
+            # conciliación periódica, que sólo mira las pendientes, tampoco la volvía a revisar.
+            # Propagarla deja la transacción como estaba: el webhook responde 500 para que Nave
+            # reintente, y la conciliación la retoma en la corrida siguiente.
+            _logger.error(
+                "[payment_nave] No se pudo consultar el pago %s de la transacción %s en Nave; "
+                "queda como estaba. Error: %s", payment_id, self.reference, e,
+            )
+            raise
 
         # Evaluar estado devuelto por la API oficial
         status_info = payment_data.get('status', {})

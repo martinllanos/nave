@@ -3,6 +3,7 @@
 import json
 import logging
 from odoo import http
+from odoo.exceptions import ValidationError
 from odoo.http import request
 
 _logger = logging.getLogger(__name__)
@@ -43,16 +44,30 @@ class PaymentNaveController(http.Controller):
             _logger.warning("Webhook omitido: Faltan campos clave (external_payment_id o payment_id).")
             return request.make_response("Bad Request", [('Content-Type', 'text/plain')], status=400)
 
-        # Delegar el procesamiento al modelo transaction
-        # Usar sudo() ya que es una llamada S2S pública
+        # El código de respuesta le dice a Nave si tiene sentido reintentar:
+        # - 400: el aviso no trae lo mínimo para procesarlo (arriba).
+        # - 200: se aplicó, o no corresponde a ninguna transacción del sitio y ningún reintento lo va
+        #   a cambiar. Nave manda a esta URL los pagos de todo el comercio, también los del punto de
+        #   venta, que se resuelven consultando la intención y no necesitan el aviso. Es lo que hace
+        #   el core con Stripe (payment_stripe/controllers/main.py).
+        # - 500: falló algo que un reintento puede resolver, como la consulta del pago a Nave.
+        #
+        # El savepoint descarta lo que el procesamiento haya escrito antes de fallar: si no, el
+        # cursor se confirma igual al devolver la respuesta, y el reintento encontraría la
+        # transacción a medio aplicar. Se usa sudo() porque es una llamada S2S pública.
         try:
-            request.env['payment.transaction'].sudo()._handle_notification_data('nave', data)
+            with request.env.cr.savepoint():
+                request.env['payment.transaction'].sudo()._handle_notification_data('nave', data)
+        except ValidationError as e:
+            _logger.info(
+                "[payment_nave] Aviso de Nave que no corresponde a ninguna transacción del sitio "
+                "(puede ser un cobro del punto de venta); se acusa sin aplicar. Referencia: %s. "
+                "Pago: %s. Motivo: %s", external_payment_id, payment_id, e,
+            )
         except Exception as e:
             _logger.error("Error al procesar la notificación del Webhook para %s: %s", external_payment_id, e)
-            # Responder con HTTP 500 para forzar el reintento de Nave si hubo una falla del lado de Odoo
             return request.make_response("Internal Server Error", [('Content-Type', 'text/plain')], status=500)
 
-        # Responder HTTP 200 de forma inmediata conforme a la especificación técnica de Nave
         return request.make_response("OK", [('Content-Type', 'text/plain')], status=200)
 
     @http.route('/payment/nave/return', type='http', auth='public', methods=['GET', 'POST'], csrf=False)

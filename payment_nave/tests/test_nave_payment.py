@@ -1468,3 +1468,67 @@ class TestNaveProvider(PaymentCommon):
 
         self.assertEqual(detalle[0]['quantity'], 3)
         self.assertEqual(detalle[0]['name'], 'Producto suelto')
+
+    # ──────────────────────────────────────────────
+    # 11. UNA FALLA DE COMUNICACIÓN NO CIERRA LA TRANSACCIÓN
+    # ──────────────────────────────────────────────
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_60_la_consulta_fallida_deja_la_transaccion_como_estaba(self, mock_get):
+        """Si Nave no responde la consulta del pago, la falla sale y la transacción sigue pendiente.
+
+        Antes quedaba en error y el webhook respondía 200: nadie la volvía a revisar aunque el pago
+        se hubiera cobrado.
+        """
+        self._nave_arm_token()
+        tx = self._nave_make_tx('TEST-NAVE-NET-001')
+        tx._set_pending()
+        mock_get.side_effect = requests.exceptions.ConnectionError("sin red")
+
+        with self.assertRaises(requests.exceptions.RequestException):
+            tx._process_notification_data({
+                'payment_id': 'pay-net-001',
+                'external_payment_id': 'TEST-NAVE-NET-001',
+            })
+
+        self.assertEqual(tx.state, 'pending')
+        self.assertFalse(tx.nave_payment_id, "Un pago que no se pudo verificar no queda asociado")
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_61_la_conciliacion_retoma_el_pago_que_no_pudo_consultar(self, mock_get):
+        """La intención se resolvió pero la consulta del pago falla: la transacción sigue pendiente.
+
+        Es la variante de test_22 con la segunda consulta fallando. Antes esa transacción quedaba
+        en error y la conciliación, que sólo mira las pendientes, no volvía a tomarla.
+        """
+        self._nave_arm_token()
+        failing = self._nave_make_stale_tx('TEST-NAVE-CRON-006', 'pr-cron-006')
+        healthy = self._nave_make_stale_tx('TEST-NAVE-CRON-007', 'pr-cron-007')
+
+        def _dispatch(url, **kwargs):
+            for sufijo in ('006', '007'):
+                if f'pr-cron-{sufijo}' in url:
+                    return MagicMock(
+                        json=MagicMock(return_value={
+                            'id': f'pr-cron-{sufijo}',
+                            'status': {'name': 'SUCCESS_PROCESSED'},
+                            'payment_attempts': {'payments': [{'payment_id': f'pay-cron-{sufijo}'}]},
+                        }),
+                        raise_for_status=MagicMock(return_value=None),
+                    )
+            if 'pay-cron-006' in url:
+                raise requests.exceptions.Timeout("Nave no respondió")
+            return MagicMock(
+                json=MagicMock(return_value={
+                    'id': 'pay-cron-007',
+                    'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
+                }),
+                raise_for_status=MagicMock(return_value=None),
+            )
+
+        mock_get.side_effect = _dispatch
+
+        self.env['payment.transaction']._cron_nave_poll_pending_transactions()
+
+        self.assertEqual(failing.state, 'pending', "Queda para la corrida siguiente")
+        self.assertEqual(healthy.state, 'done', "El resto del lote se concilia igual")
