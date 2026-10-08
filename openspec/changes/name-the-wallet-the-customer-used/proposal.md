@@ -36,7 +36,10 @@ cliente no reconoce *"bind pago"*. Y el cajero, ante un reclamo, tampoco sabe qu
    el nombre de la app que vio el cliente (`tasks/reunion_tecnica_nave.md`, consulta 9). Si lo
    tienen, el diccionario puede no hacer falta.
 2. **Juntar los valores reales** de `nave_wallet_name` en producción, con la billetera que usó el
-   cliente cuando se sepa. Hasta hoy: `mercado pago` (sandbox) y `bind pago` (Belo).
+   cliente cuando se sepa. Hasta hoy: `mercado pago` (sandbox), `bind pago` (Belo) y
+   `banco galicia - modo` (app de Galicia, §3.41). Junto con el nombre, Nave manda
+   `wallet.coelsa_id` (`"88"` para Galicia) y el CUIT de la entidad: el `coelsa_id` puede ser
+   mejor clave que el nombre, si es el identificador de la entidad en el sistema de transferencias.
 3. **Decidir dónde vive el diccionario:** un modelo editable por compañía, datos del módulo o las
    dos cosas, con valores de fábrica que el comercio pueda corregir.
 

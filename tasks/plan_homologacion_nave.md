@@ -458,6 +458,31 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.41 Nave Point con *Código QR* en la terminal (2026-10-08)
+
+Cobro real de $150 con *Nave Point* en Odoo, eligiendo *Código QR* en la terminal y pagando con la
+app de Galicia (MODO). Evidencia en `docs/homologacion/evidencias/C2_qr_terminal/`.
+
+| Paso | Resultado |
+|---|---|
+| Envío | ✅ *"Enviando el cobro a la terminal 5d0ab925…"* a las 20:42:58 UTC. Odoo, *"Esperando la tarjeta"* |
+| Pago | ✅ La terminal mostró su QR con el monto. Nave aprobó a las 20:45:49, el webhook respondió 200 sin reintentos y el POS lo registró en esa misma consulta: *Pago exitoso* |
+| Cupón de la terminal | ✅ *"Código QR - Dinero en cuenta"*, código de operación `ONQ625134352`. Sin la mezcla de crédito y débito de los cupones con tarjeta |
+
+**Lo que informa Nave del pago:** `payment_input: wallet`, `payment_method.type: transfer_payment`
+y `wallet.name: "banco galicia - modo"`, con `wallet.coelsa_id: "88"` y el CUIT de la entidad. Para
+este pago, el nombre ya es el de la billetera que usó el cliente; con Belo había llegado el del
+procesador. El `coelsa_id` es un candidato a clave para el diccionario de
+`name-the-wallet-the-customer-used`. Nave también manda el CBU de la cuenta del cliente: no se
+registra en el repo.
+
+**Una sola caja, dos medios:** para el cajero no cambia nada. Elige *Nave Point* y el cliente decide
+en la terminal si paga con tarjeta o con QR. El texto *"Esperando la tarjeta"* no sirve para el QR de
+la terminal, pero Odoo no sabe qué va a elegir el cliente. Queda como está.
+
+**Nave acredita el neto:** Galicia avisó *"Cobraste $148,55 con Nave"* por los $150, es decir $1,45
+de comisión. Es la misma proporción que en el QR fijo (§3.40). Va al bloque F.
+
 ### 3.40 Nave QR fijo: cobro real con billetera (2026-10-08)
 
 `pos_nave 18.0.1.11.1`, método *Nave QR* con el `pos_id` del *QR 1* del local. Evidencia en
@@ -2143,7 +2168,7 @@ Lo primero que se presenta a Nave. Lo que queda afuera no se descarta: se homolo
 |---|---|---|
 | Checkout online | A1 a A13, A16 a A18 | ✅ |
 | Nave Point con tarjeta | C0 a C9, C12, C16 | ✅ |
-| Nave Point con *Código QR* en la terminal | C2 con QR | ⬜ La terminal lo ofrece; no se probó desde estas correcciones |
+| Nave Point con *Código QR* en la terminal | C2 con QR | ✅ 2026-10-08, cobro real con MODO (§3.41) |
 | Nave QR fijo | H1 a H8, H10 | ✅ H1, H2, H4 a H7 y H10 (§3.40). Falta H8, los errores propios del QR |
 | Webhook de los pagos del POS | — | ✅ 2026-10-08: responde 200 y Nave no reintenta (§3.39) |
 | Seguridad del webhook | E1c a E3c | ⬜ La restricción de host de `payment_check_url` está en el código; falta la prueba |
