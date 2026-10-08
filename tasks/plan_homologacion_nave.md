@@ -1964,7 +1964,7 @@ deciden cómo se escribe el fix de B11.
 | C7 | Salir de la pantalla de pago | Iniciar cobro → botón Back | La intención queda viva: **la terminal sigue cobrable**. No hay `close()` implementado | ✅ 2026-10-08: el core no llama a `close()` y el cobro sigue. Desde productos, una cancelación posterior funciona y un pago real se registra igual. Un segundo cobro con terminal en la misma pestaña lo bloquea el core. §3.38 |
 | C8 | Corte de red durante el polling 🔴 | Iniciar cobro y cortar la conexión de Odoo | **Se espera spinner infinito sin diálogo de error** (B4). Verificar que la única salida es "Force done" | 🔴 2026-10-07: con un corte que falla al instante, el POS da el cobro por fallido a los ~9 s mientras la terminal sigue cobrando; Nave aprobó $150 y Odoo quedó en *"Volver a intentar"*, camino directo a un cobro doble. Con un corte que cuelga la consulta, el POS espera sin límite ni aviso. §3.34. ✅ Reprueba con 18.0.1.11.0: el corte ya no termina el cobro, el POS avisa y registra el pago al volver la conexión, y *Volver a intentar* encontró los $150 del pedido 104 sin cobrar de nuevo. §3.35 |
 | C9 | "Force done" con pago rechazado | Rechazar en la terminal y presionar Force done | La venta se cierra como cobrada sin cobro real. **Hallazgo a documentar y mitigar** | 🔴 2026-10-07: después de un rechazo el botón no aparece, pero mientras se espera la tarjeta *Forzar terminación* deja la línea en *"Pago exitoso"* con *Validar* habilitado, sin cobro y con la terminal todavía cobrable. Unos 3 min después, la baja devuelve la línea a reintentable. §3.32. ✅ Reprueba con 18.0.1.10.1: el botón consulta a Nave; forzar mientras espera no da nada por cobrado, un rechazo da un solo aviso y sin conexión se pregunta al cajero sin que el polling le gane. Pendiente sólo el forzado sobre un cobro aprobado. §3.33 |
-| C10 | Terminal ocupada | Lanzar un cobro con otro en curso | `device_already_on_payment_flow` (`doc_point.md` §6). Verificar el mensaje al cajero. **Caso real a cubrir** (2026-10-07): en una farmacia, 3 o 4 cajas (POS) comparten un solo Nave Point. Hoy el módulo asume una terminal por POS; probar dos cajas cobrando a la vez con la misma terminal, junto con C7 | ⬜ |
+| C10 | Terminal ocupada | Lanzar un cobro con otro en curso | `device_already_on_payment_flow` (`doc_point.md` §6). Verificar el mensaje al cajero. **Caso real a cubrir** (2026-10-07): en una farmacia, 3 o 4 cajas (POS) comparten un solo Nave Point. Hoy el módulo asume una terminal por POS; probar dos cajas cobrando a la vez con la misma terminal, junto con C7 | ⏸️ Postergado el 2026-10-08, fuera del producto mínimo (§5.1) |
 | C11 | Terminal con batería < 5% | Descargar la terminal | `low_battery`. Verificar manejo | ⬜ |
 | C12 | Datos en el ticket | Cobro aprobado → imprimir | **Hoy no se llama a `set_receipt_info()`**: el ticket no imprime marca, últimos 4 ni cupón, aunque la API los devuelve (`doc_point.md:104-138`). Confirmar si Nave lo exige |✅ 2026-10-06: el ticket sí se completa. Lleva marca, últimos cuatro, tipo, cupón, autorización, lote y emisor. §3.27 |
 | C13 | Devolución desde POS | Orden de devolución → Tarjeta | 🚫 Falla por B2/B3 (`REFUND-CIEGO`) | ⬜ |
@@ -2057,6 +2057,33 @@ La homologación se considera lista para presentar a Nave cuando:
 6. **E1c cerrado**: el SSRF no es negociable.
 7. **E0.1 a E0.4 en verde**: tests, flake8 y bandit limpios (§6 de `.agent/rules.md`).
 8. Evidencias completas según §6.
+
+### 5.1 Producto mínimo viable (decidido el 2026-10-08)
+
+Lo primero que se presenta a Nave. Lo que queda afuera no se descarta: se homologa después.
+
+| Entra | Casos | Estado al 2026-10-08 |
+|---|---|---|
+| Checkout online | A1 a A13, A16 a A18 | ✅ |
+| Nave Point con tarjeta | C0 a C9, C12, C16 | ✅ |
+| Nave Point con *Código QR* en la terminal | C2 con QR | ⬜ La terminal lo ofrece; no se probó desde estas correcciones |
+| Nave QR fijo | H1 a H8, H10 | ⬜ |
+| Webhook de los pagos del POS | — | 🔴 Responde 500 y Nave reintenta (consulta 6 de la reunión) |
+| Seguridad del webhook | E1c a E3c | ⬜ La restricción de host de `payment_check_url` está en el código; falta la prueba |
+| Robustez del webhook | D2c a D6c | ⬜ |
+| Contabilidad y cierre de caja | F1 a F4, C15 | ⬜ |
+| Calidad | E0.1 a E0.4, E4c | ✅ en cada commit |
+
+| Queda para después | Por qué |
+|---|---|
+| Links de pago (bloque B) | Fuera del primer alcance |
+| Multi-compañía (bloque G) | Fuera del primer alcance. El código ya liga las credenciales a la compañía; falta probarlo |
+| Devoluciones por API (A14, A15, B9c, C13, H9, D9c) | Las bloquea el permiso que tiene que dar Nave (consulta 1 de la reunión). Mientras tanto, la devolución se hace desde el panel de Nave |
+| Varias cajas con una terminal (C10) | Postergado el 2026-10-08. Una caja sola no puede chocar dos cobros (§3.38) |
+| Batería baja (C11) y webhook de baja de intención (C14) | C14 depende de que Nave notifique las intenciones (consulta 3 de la reunión) |
+
+Esto reemplaza, para la primera presentación, los puntos 3 y 5 de los criterios de arriba: el bloque B
+y la devolución de punta a punta pasan a la segunda.
 
 ---
 
