@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Los identificadores con los que el proveedor reconoce cada cobro, a la vista en la orden.
+         Son de sólo lectura: el ID de transacción es el que se usa para consultar o devolver el pago. -->
+    <record id="view_pos_pos_form_inherit_pos_nave" model="ir.ui.view">
+        <field name="name">pos.order.form.inherit.pos.nave</field>
+        <field name="model">pos.order</field>
+        <field name="inherit_id" ref="point_of_sale.view_pos_pos_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='payment_ids']/list/field[@name='cardholder_name']" position="after">
+                <field name="payment_ref_no" readonly="1"/>
+                <field name="transaction_id" readonly="1"/>
+                <field name="payment_method_authcode" readonly="1" optional="hide"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_pos_payment_tree_inherit_pos_nave" model="ir.ui.view">
+        <field name="name">pos.payment.list.inherit.pos.nave</field>
+        <field name="model">pos.payment</field>
+        <field name="inherit_id" ref="point_of_sale.view_pos_payment_tree"/>
+        <field name="arch" type="xml">
+            <field name="amount" position="after">
+                <field name="payment_ref_no" optional="show"/>
+                <field name="transaction_id" optional="show"/>
+            </field>
+        </field>
+    </record>
+
+    <!-- Del panel del proveedor a la venta: buscar el pago por su referencia o su ID. -->
+    <record id="view_pos_payment_search_inherit_pos_nave" model="ir.ui.view">
+        <field name="name">pos.payment.search.inherit.pos.nave</field>
+        <field name="model">pos.payment</field>
+        <field name="inherit_id" ref="point_of_sale.view_pos_payment_search"/>
+        <field name="arch" type="xml">
+            <field name="pos_order_id" position="after">
+                <field name="payment_ref_no"/>
+                <field name="transaction_id"/>
+            </field>
+        </field>
+    </record>
+</odoo>

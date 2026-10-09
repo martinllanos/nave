@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Punto de Venta Nave',
-    'version': '18.0.1.11.4',
+    'version': '18.0.1.11.5',
     'category': 'Sales/Point of Sale',
     'summary': 'Cobros presenciales de Nave (Naranja X / Galicia) en el Punto de Venta de Odoo: terminal Nave Point y QR interoperable.',
     'description': """
@@ -27,6 +27,7 @@
     ],
     'data': [
         'views/pos_payment_method_views.xml',
+        'views/pos_order_views.xml',
     ],
     'assets': {
         'point_of_sale._assets_pos': [
