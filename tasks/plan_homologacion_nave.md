@@ -458,6 +458,30 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.50 B1c, B5c y B6c: el asistente sobre una factura, en producción (2026-10-09)
+
+Factura `FA-C 00001-00000021`, $39,99. Se generaron tres links con el asistente y se pagó sólo el
+último, por QR con Belo. Evidencia en `docs/homologacion/evidencias/B1c_B5c_B6c/`.
+
+| Link (transacción) | Validez pedida | En Nave, después del pago |
+|---|---|---|
+| `FA-C 00001-00000021` | **0** horas | **PENDING**, creada 09/10 06:33, vence **16/10**: Nave tomó 0 como 7 días |
+| `FA-C 00001-00000021-1` (A) | 24 h | **PENDING**, vence 10/10 |
+| `FA-C 00001-00000021-2` (B) | 24 h | `SUCCESS_PROCESSED`, pagado |
+
+- **B1c ✅** Nave avisó a las 06:37:14 UTC, `APPROVED`, 200. La transacción quedó confirmada, y la
+  factura pasó a *en proceso de pago* con saldo $0 y el pago `PBNK1/2026/00017` en Banco **cuando corrió
+  el post-proceso programado** (06:43, cada 10 minutos). El link se paga fuera del sitio, así que no
+  hay página de retorno que lo dispare antes. Mejora posible: post-procesar al recibir el aviso.
+- **B5c ⚠️** El asistente acepta 0 horas y Nave lo toma como **7 días**. El asistente tiene que exigir
+  entre 1 y 168 horas. El caso de 200 horas no se probó.
+- **B6c 🔴** Cada link nuevo crea su transacción y su referencia (`-1`, `-2`), pero **los anteriores
+  siguen cobrables** después de pagar uno. Con la factura cobrada, dos links quedaron activos: el
+  cliente podría pagar dos veces. Al generar un link hay que dar de baja los pendientes del mismo
+  documento (Nave permite `DELETE` de una intención `payment_link`), y al cobrarse uno, dar de baja los
+  demás.
+- 🔴 El chatter vuelve a mostrar el HTML crudo (§3.49).
+
 ### 3.49 B2c: link de pago Nave desde un pedido de venta, en producción (2026-10-09)
 
 Pedido `S00043`, $246,90, con **⚙ Acción → Generar Link de Pago Nave**. Pagado por QR con Belo.
@@ -2337,12 +2361,12 @@ deciden cómo se escribe el fix de B11.
 
 | ID | Caso | Pasos | Resultado esperado | Estado |
 |---|---|---|---|---|
-| B1c | Generar link desde factura | Factura confirmada → Acción → Generar Link | Link `https://checkout.ranty.io/link/...` en el wizard y posteado al chatter | ⬜ |
+| B1c | Generar link desde factura | Factura confirmada → Acción → Generar Link | Link `https://checkout.ranty.io/link/...` en el wizard y posteado al chatter | ✅ 2026-10-09, producción: link generado y pagado; la factura queda con saldo $0 al correr el post-proceso (hasta 10 min). 🔴 Chatter con HTML crudo. §3.50 |
 | B2c | Generar link desde pedido de venta | Ídem sobre `sale.order` | Ídem | ✅ 2026-10-09, producción: link generado, pagado, transacción confirmada y factura con saldo $0. 🔴 El chatter muestra el HTML crudo. §3.49 |
 | B3c | Pago del link → conciliación | Abrir el link en incógnito y pagar | Webhook llega, **factura pasa a Pagada**. 🚫 Hoy: 500 + reintentos + factura impaga (B1) | ✅ 2026-10-09, producción, desde el portal de la factura: aviso aplicado, factura con saldo $0 y pago en Banco. §3.48 |
 | B4c | Duración del link | Probar 24 h, 48 h y 168 h (las tres opciones del panel, §3.9.g) | El link expira al plazo indicado. Verificar el estado que notifica Nave | ⬜ |
-| B5c | Duración inválida | `duration_hours = 0`, negativo, o > 168 | Debería rechazarse; **hoy no hay validación** (`nave_link_wizard.py:71-75`). El tope razonable es 168 h (§3.9.g) | ⬜ |
-| B6c | Regenerar link de la misma factura | Generar dos veces | Mismo `external_payment_id` truncado (`:179`). **El panel dice que cada link es único y de un solo uso** (§3.9.h) → verificar si Nave lo rechaza | ⬜ |
+| B5c | Duración inválida | `duration_hours = 0`, negativo, o > 168 | Debería rechazarse; **hoy no hay validación** (`nave_link_wizard.py:71-75`). El tope razonable es 168 h (§3.9.g) | ⚠️ 2026-10-09: el asistente acepta 0 horas y Nave lo toma como 7 días. Hay que validar entre 1 y 168. §3.50 |
+| B6c | Regenerar link de la misma factura | Generar dos veces | Mismo `external_payment_id` truncado (`:179`). **El panel dice que cada link es único y de un solo uso** (§3.9.h) → verificar si Nave lo rechaza | 🔴 2026-10-09: cada link tiene su referencia, pero los anteriores siguen cobrables después de pagar uno: riesgo de doble cobro. §3.50 |
 | B7c | Retorno del pagador | Pagar el link | El payload del link **no incluye `callback_url`** → el pagador no vuelve a Odoo. Confirmar si Nave lo exige | ⬜ |
 | B9c | Devolución de un pago por link | Pago del link aprobado → devolver | Mismo ciclo que A14/A15. Depende de B1 (sin tx no hay nada que devolver) | ⬜ |
 | B8c | Link sobre nota de crédito | Acción sobre un `out_refund` | El wizard abre y cobraría (`:108-118`). Definir si debe bloquearse | ⬜ |
