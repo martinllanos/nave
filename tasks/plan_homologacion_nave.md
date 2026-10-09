@@ -458,6 +458,31 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.46 D5c, D6c, F1 y F3 (2026-10-09)
+
+**F1 — asiento del cobro online ✅** (producción, sólo lectura). Las 11 transacciones online pagadas de
+las pruebas A tienen **un solo** `account.payment` cada una, en el diario Banco (`PBNK1/2026/00001` a
+`00011`). Cada pago debita *1.1.1.02.003 Recibos pendientes*, acredita *1.1.3.01.010 Créditos por
+ventas* del cliente y queda *en proceso* hasta conciliarlo con el extracto. El pedido queda confirmado.
+Donde hubo factura (`S00007`, `FA-C 00001-00000001`), la factura quedó *en proceso de pago*,
+conciliada con el cobro. En los demás pedidos el cobro queda como anticipo del cliente hasta que se
+facture: es el circuito estándar de Odoo.
+
+**F3 — trazabilidad ✅, con una salvedad.** Las 11 guardan el `nave_payment_id`, y la transacción
+muestra los datos del cobro (§ A18). Pero `provider_reference`, el campo estándar de Odoo para la
+referencia del proveedor, queda **vacío en todas**. Odoo lo muestra en la transacción, lo usa en la
+búsqueda y lo copia al pago. Llenarlo con el **código de operación** de Nave (`payment_code`, por
+ejemplo `ONQ625134352`), que es lo que figura en el panel y en el resumen de liquidaciones, ayudaría
+a conciliar. Queda como mejora menor.
+
+**D5c — aviso duplicado ✅** (local, circuito completo con post-proceso y rollback). El mismo aviso
+aprobado dos veces, con el post-proceso entre medio, deja la transacción pagada y **un solo** pago
+contable. En producción, además, Nave ya no reintenta los avisos acusados con 200 (§3.39).
+
+**D6c — aviso fuera de orden ✅** (local, con rollback). Un `PENDING` que llega después de un `APPROVED`
+deja la transacción pagada, con el pago aprobado. El core no permite volver de `done` a `pending`, y el
+rechazo tardío ya estaba cubierto en A17 y en el test 37.
+
 ### 3.45 E3c: quién ve las credenciales de Nave (2026-10-09)
 
 Verificado en producción con usuarios temporales de cada perfil, creados y descartados en la misma
@@ -2308,8 +2333,8 @@ deciden cómo se escribe el fix de B11.
 | D2c | JSON inválido | POST con body roto | 400 "Invalid JSON" | ✅ 2026-10-08, producción: 400. Desde `payment_nave 18.0.1.12.3` se registra como advertencia. §3.39 y §3.40 |
 | D3c | Campos faltantes | POST sin `payment_id` | 400 | ✅ 2026-10-08, producción: 400 con la advertencia *"Webhook omitido: faltan campos clave"*. §3.39 |
 | D4c | Referencia inexistente | POST con `external_payment_id` inventado | **500 + Nave reintenta en loop**. Evaluar responder 200 ante fallos permanentes | ✅ 2026-10-08, `payment_nave 18.0.1.12.2`: 200 con una línea de información, sin error. Un pago real del POS recibió un solo aviso y Nave no reintentó. §3.39 |
-| D5c | Webhook duplicado | Enviar el mismo webhook dos veces | Idempotente: sin doble asiento | ⬜ |
-| D6c | Webhook fuera de orden | `APPROVED` y después `PENDING` | La tx no debe retroceder de `done` | ⬜ |
+| D5c | Webhook duplicado | Enviar el mismo webhook dos veces | Idempotente: sin doble asiento | ✅ 2026-10-09, local con post-proceso: el duplicado no crea un segundo pago contable. §3.46 |
+| D6c | Webhook fuera de orden | `APPROVED` y después `PENDING` | La tx no debe retroceder de `done` | ✅ 2026-10-09, local: `PENDING` después de `APPROVED` no hace retroceder la transacción. §3.46 |
 | D7c | Reintentos de Nave | Devolver 500 en el primer intento | Nave reintenta a los 10 s y concilia en el segundo | ⬜ |
 | D8c | Pérdida total del webhook | Bajar el sitio > 7h45m y pagar | El cron de conciliación (B9, resuelto) recupera la transacción en la corrida siguiente. Su rama `EXPIRED` ya quedó verificada en A8 | ⬜ |
 | D9c | `REFUNDED` sobre tx `done` | Simular el webhook | `_set_canceled` no admite `done` → **warning y sin efecto** (`payment_transaction.py:297-299`) | ⬜ |
@@ -2328,9 +2353,9 @@ deciden cómo se escribe el fix de B11.
 
 | ID | Caso | Pasos | Resultado esperado | Estado |
 |---|---|---|---|---|
-| F1 | Asiento del cobro online | A2 completo | Asiento en el diario del provider, factura conciliada | ⬜ |
+| F1 | Asiento del cobro online | A2 completo | Asiento en el diario del provider, factura conciliada | ✅ 2026-10-09, producción: un pago por cobro en el diario Banco, pedido confirmado, factura conciliada donde la hubo. §3.46 |
 | F2 | Asiento del cobro POS | C2 + cierre de sesión | Asiento correcto en el diario del método de pago | ✅ 2026-10-09: asiento de sesión `POSS/2026/10/0017` cuadrado y un pago por método (`PBNK1/2026/00012` Nave Point $1.623,44, `PBNK1/2026/00013` Nave QR $147). Las 16 facturas quedan pagadas. §3.42 |
-| F3 | Trazabilidad | Cualquier cobro | `nave_payment_id` visible en la transacción. Nota: **`provider_reference` queda vacío** — Odoo lo usa para trazabilidad estándar | ⬜ |
+| F3 | Trazabilidad | Cualquier cobro | `nave_payment_id` visible en la transacción. Nota: **`provider_reference` queda vacío** — Odoo lo usa para trazabilidad estándar | ✅ 2026-10-09: `nave_payment_id` en todas. ⚠️ `provider_reference` vacío; conviene llenarlo con el código de operación de Nave. §3.46 |
 | F4 | Total vs monto cobrado | Pedido con lista de precios Nave | Total del pedido == `amount.value` == monto en el panel de Nave | ✅ en lo que pedía: el total del pedido, el `amount.value` y lo que cobró Nave coinciden. ⚠️ Nave acredita el **neto**, y la comisión no queda en ningún asiento. §3.42 |
 
 ### Bloque G — Multi-compañía
@@ -2367,7 +2392,7 @@ La homologación se considera lista para presentar a Nave cuando:
 
 Lo primero que se presenta a Nave. Lo que queda afuera no se descarta: se homologa después.
 
-| Entra | Casos | Estado al 2026-10-08 |
+| Entra | Casos | Estado al 2026-10-09 |
 |---|---|---|
 | Checkout online | A1 a A13, A16 a A18 | ✅ |
 | Nave Point con tarjeta | C0 a C9, C12, C16 | ✅ |
@@ -2375,8 +2400,8 @@ Lo primero que se presenta a Nave. Lo que queda afuera no se descarta: se homolo
 | Nave QR fijo | H1 a H8, H10 | ✅ H1, H2, H4 a H8 y H10 (§3.40 y §3.43) |
 | Webhook de los pagos del POS | — | ✅ 2026-10-08: responde 200 y Nave no reintenta (§3.39) |
 | Seguridad del webhook | E1c a E3c | ✅ E1c, E2c (§3.44) y E3c (§3.45) |
-| Robustez del webhook | D2c a D6c | D2c a D4c ✅; D5c y D6c ⬜ |
-| Contabilidad y cierre de caja | F1 a F4, C15 | ✅ C15, F2 y F4 (§3.42). ⚠️ La comisión que Nave descuenta del neto no queda asentada. F1 y F3 ⬜ |
+| Robustez del webhook | D2c a D6c | ✅ D2c a D4c (§3.39) y D5c, D6c (§3.46) |
+| Contabilidad y cierre de caja | F1 a F4, C15 | ✅ C15, F1 a F4 (§3.42 y §3.46). ⚠️ La comisión que Nave descuenta del neto no queda asentada (historia `reconcile-nave-settlements`) |
 | Calidad | E0.1 a E0.4, E4c | ✅ en cada commit |
 
 | Queda para después | Por qué |
