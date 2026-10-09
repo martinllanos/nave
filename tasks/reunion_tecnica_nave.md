@@ -174,8 +174,12 @@ contestada en la práctica; la 1 y la 3 siguen abiertas.
 
 **Preguntas:**
 
-1. ¿A qué hora es el cierre de lote? ¿Cuándo se liquida?
-2. ¿Hay un archivo o un endpoint de conciliación?
+1. ¿A qué hora es el cierre de lote? ¿Cuándo se liquida? En el resumen del panel, todos los cobros
+   de prueba figuran acreditados el mismo día.
+2. ¿Hay un endpoint de liquidaciones con las columnas del resumen del panel (bruto, comisión, IVA
+   de la comisión, neto, fecha de acreditación, ID externo de pago)? Si no, ¿el formato del Excel es
+   estable? Lo queremos usar para conciliar automáticamente (cambio `reconcile-nave-settlements`).
+3. ¿Nave emite factura por las comisiones? La necesitamos para computar el IVA crédito fiscal.
 
 - Respuesta:
 
