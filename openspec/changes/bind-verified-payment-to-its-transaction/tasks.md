@@ -24,7 +24,7 @@
 - [x] 2.2 Correr las suites de `payment_nave` y `pos_nave`, más flake8 y bandit según
       `.agent/rules.md` §6. Verificar: 0 fallos, 0 errores de lint y 0 hallazgos de severidad media o
       superior.
-- [ ] 2.3 Desplegar, verificar versión y hash, y repetir en producción el aviso falso. Usar la
+- [x] 2.3 Desplegar, verificar versión y hash, y repetir en producción el aviso falso. Usar la
       referencia `A5-S00041` (cancelada) y el `payment_id` real de un cobro presencial aprobado.
       Verificar: responde 200, el log lo registra como sospechoso y la transacción sigue cancelada.
       Registrar el resultado en el plan (§3.44, filas E1c y E2c).

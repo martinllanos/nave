@@ -488,6 +488,23 @@ como aviso sospechoso y se acusa con 200. Los pagos de una misma intención comp
 así que el reintento después de un rechazo sigue funcionando. Esto deja resuelto también E2c: un aviso
 sin autenticación sólo se aplica si Nave confirma el pago y el pago es de esa transacción.
 
+**Corregido en `bind-verified-payment-to-its-transaction`** (`payment_nave 18.0.1.12.5`). Verificado en
+producción el 2026-10-09, con un control previo de versión y hash: si el despliegue no hubiera
+tomado, el aviso no se mandaba. El aviso falso llevó la referencia `A5-S00041`, que está cancelada, y
+el `payment_id` **real** del cobro de $150 con QR de la terminal (`608d70dd…`, aprobado). Con el
+código anterior, ese aviso la dejaba pagada.
+
+- ✅ Nave confirmó el pago como aprobado, y Odoo detectó que no era de esa transacción: *"Aviso
+  sospechoso: el pago 608d70dd… no es de la transacción A5-S00041 (referencia del pago '6c2cdc15…',
+  intención del pago '3ab25e46…' …). No se aplica."*
+- ✅ El webhook respondió 200. `A5-S00041` siguió cancelada, con su pago original, y el pedido en
+  borrador.
+
+**Pendiente menor:** después de la advertencia, el controlador anota su línea genérica para un
+`ValidationError`: *"Aviso de Nave que no corresponde a ninguna transacción del sitio (puede ser un
+cobro del punto de venta)"*. Para este caso confunde. La advertencia anterior es la que dice lo que
+pasó.
+
 ### 3.43 H8: errores al crear el cobro con QR (2026-10-09)
 
 **Lo que documenta Nave hoy** (página del QR interoperable, *Códigos de errores*; leída del
@@ -2282,8 +2299,8 @@ deciden cómo se escribe el fix de B11.
 
 | ID | Caso | Pasos | Resultado esperado | Estado |
 |---|---|---|---|---|
-| E1c | SSRF vía `payment_check_url` 🔴 | POST al webhook con una `reference` válida y `payment_check_url` apuntando a un host propio que responda `APPROVED` | **Debe rechazarse.** Hoy se marca la factura como pagada (B5) | ✅ 2026-10-09, producción: la URL ajena se ignora y no se visita; la transacción no cambia. 🔴 Hallazgo nuevo: el pago verificado no se ata a la transacción. §3.44 |
-| E2c | Webhook sin autenticación | POST anónimo con datos plausibles | Mitigado sólo por el GET de verificación. Documentar la postura ante Nave | ⬜ |
+| E1c | SSRF vía `payment_check_url` 🔴 | POST al webhook con una `reference` válida y `payment_check_url` apuntando a un host propio que responda `APPROVED` | **Debe rechazarse.** Hoy se marca la factura como pagada (B5) | ✅ 2026-10-09, producción: la URL ajena se ignora y no se visita. El pago verificado tiene que ser de la transacción: un aviso con el pago real de otra venta se registra como sospechoso y no se aplica (`18.0.1.12.5`). §3.44 |
+| E2c | Webhook sin autenticación | POST anónimo con datos plausibles | Mitigado sólo por el GET de verificación. Documentar la postura ante Nave | ✅ 2026-10-09: Nave no firma el webhook, pero un aviso sólo se aplica si Nave confirma el pago **y** el pago es de esa transacción (§3.44). Es la postura para presentarle a Nave |
 | E3c | Secret expuesto | Usuario sin `base.group_system` abre el provider | `nave_client_secret` oculto; **`nave_client_id` no tiene `groups`** y sí se ve (`payment_provider.py:21-25`) | ⬜ |
 | E4c | Bandit sobre los tres módulos | E0.4 | 0 hallazgos ≥ medio | ✅ **0 issues** (2026-09-21). ⚠️ Bandit **no detecta el SSRF de B5**: pasar este chequeo no sustituye a E1c | ⬜ |
 
@@ -2337,7 +2354,7 @@ Lo primero que se presenta a Nave. Lo que queda afuera no se descarta: se homolo
 | Nave Point con *Código QR* en la terminal | C2 con QR | ✅ 2026-10-08, cobro real con MODO (§3.41) |
 | Nave QR fijo | H1 a H8, H10 | ✅ H1, H2, H4 a H8 y H10 (§3.40 y §3.43) |
 | Webhook de los pagos del POS | — | ✅ 2026-10-08: responde 200 y Nave no reintenta (§3.39) |
-| Seguridad del webhook | E1c a E3c | ⬜ La restricción de host de `payment_check_url` está en el código; falta la prueba |
+| Seguridad del webhook | E1c a E3c | ✅ E1c y E2c (§3.44). E3c ⬜ |
 | Robustez del webhook | D2c a D6c | D2c a D4c ✅; D5c y D6c ⬜ |
 | Contabilidad y cierre de caja | F1 a F4, C15 | ✅ C15, F2 y F4 (§3.42). ⚠️ La comisión que Nave descuenta del neto no queda asentada. F1 y F3 ⬜ |
 | Calidad | E0.1 a E0.4, E4c | ✅ en cada commit |
