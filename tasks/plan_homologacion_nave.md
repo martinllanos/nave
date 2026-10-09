@@ -775,6 +775,8 @@ Con los dos QR del 2026-10-08 (§3.40 y §3.41), la comisión fue de ~0,97 %.
 - **Tarifas observadas:** tarjeta (Mastercard prepaga, Amex crédito) **4,8 %**, y QR o dinero en
   cuenta **0,8 %**, las dos más el 21 % de IVA sobre la comisión. Un cobro de $15 con dinero en cuenta
   del 05/10 no tuvo comisión. Las cuentas cierran al centavo: bruto − comisión − IVA = neto.
+  Las tarifas vigentes por canal y medio están publicadas en
+  <https://navenegocios.ar/home/comisiones---nave>.
 - Para conciliar esta sesión a mano hay que registrar $73,11 de comisiones y $15,35 de IVA crédito
   fiscal, y repartir los dos pagos de Odoo entre las ocho acreditaciones del extracto.
 

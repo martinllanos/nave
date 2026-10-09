@@ -23,7 +23,8 @@ que:
 
 Con un comercio que cobra todo el día, eso no es viable. Y no lo resuelve un modelo de conciliación
 de Odoo, porque la comisión depende del medio de pago: 4,8 % con tarjeta, 0,8 % con QR o dinero en
-cuenta, y 0 % en algunos casos, siempre más el 21 % de IVA sobre la comisión.
+cuenta, y 0 % en algunos casos, siempre más el 21 % de IVA sobre la comisión (tarifas publicadas en
+<https://navenegocios.ar/home/comisiones---nave>).
 
 Nave ya tiene todo lo necesario en el resumen del panel (*Detalles > Descargar resumen*): una fila por
 cobro con bruto, comisión, IVA, neto, fecha de acreditación y el **ID externo de pago**. Ese ID es la
