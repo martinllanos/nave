@@ -482,6 +482,17 @@ Factura `FA-C 00001-00000021`, $39,99. Se generaron tres links con el asistente 
   demás.
 - 🔴 El chatter vuelve a mostrar el HTML crudo (§3.49).
 
+**Los dos links pendientes se dieron de baja a mano** (2026-10-09, con el visto bueno del usuario):
+`DELETE /api/payment_requests/{id}` con el motivo `disabled_from_saas`, 200 en los dos. Después, Nave
+responde `400 payment_request_is_disabled` al consultarlos: ya no se pueden pagar.
+
+**🔴 Hallazgo: la conciliación de los cobros online no reconoce una intención dada de baja.** Para una
+intención dada de baja, Nave no responde `DISABLED` sino `400 payment_request_is_disabled`, como ya se
+vio en el POS (§3.36). `_nave_poll_payment_request` hace `raise_for_status()` antes de mirar el
+estado, así que la conciliación periódica registra un error en cada corrida durante los 2 días que
+revisa la transacción, y la transacción queda **pendiente para siempre** en lugar de cancelada. El POS
+ya trata ese 400 como baja; los cobros online no. Es el caso de las dos transacciones de arriba.
+
 ### 3.49 B2c: link de pago Nave desde un pedido de venta, en producción (2026-10-09)
 
 Pedido `S00043`, $246,90, con **⚙ Acción → Generar Link de Pago Nave**. Pagado por QR con Belo.
