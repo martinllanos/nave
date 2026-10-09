@@ -458,6 +458,29 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.48 Cobro de una factura desde el portal, por link de pago, en producción (2026-10-09)
+
+Factura `FA-C 00001-00000003`, $50. El cliente entró al portal de la factura (*Pagar ahora*), eligió
+*QR Interoperable Nave* y pagó con Belo. Evidencia en `docs/homologacion/evidencias/B_produccion/`.
+
+| Paso | Resultado |
+|---|---|
+| Intención | Transacción `FA-C 00001-00000003-1`, por el endpoint **`payment_link`** con su `pos_id` (06:11:06 UTC) |
+| Página de Nave | Sólo **Código QR**, igual que en la tienda (§3.47) |
+| Aviso de Nave | ✅ 06:11:56, `APPROVED`, 200, sin reintentos. El control de pertenencia (§3.44) también acepta los pagos del link |
+| Odoo | ✅ La factura queda con **saldo $0** (`in_payment`), con el pago `PBNK1/2026/00015` en Banco. *En proceso de pago* hasta conciliarla con el extracto |
+| Comprobante de Nave | *"Medio de cobro: Link de pago"*, referencia `FA-C 00001-00000003-1`, operación `JLX630585190`. Acreditó $49,52 de $50 (0,8 % + IVA) |
+
+**Detalles:**
+
+- Un intento anterior, a las 05:59, dejó la transacción `FA-C 00001-00000003` en borrador, sin pago. Por
+  eso la que se pagó lleva `-1`. La conciliación periódica la da por vencida cuando venza su intención.
+- La captura del portal muestra la factura *"En espera del pago"* porque se tomó antes de que llegara el
+  aviso. Después del aviso, el saldo es $0.
+- Esto cubre el cobro de una factura por el portal (B3c en su variante estándar de Odoo). Queda por
+  probar el asistente propio del módulo, **Generar link de pago Nave**, que publica un link
+  `checkout.ranty.io` en el chatter (B1c y B2c).
+
 ### 3.47 Primer cobro online en producción: la tienda no ofrece tarjeta (2026-10-09)
 
 Pedido `S00017`, $1.100, en `www.onlyone.ar/shop`, eligiendo **Tarjeta** en Odoo. Evidencia en
@@ -2296,7 +2319,7 @@ deciden cómo se escribe el fix de B11.
 |---|---|---|---|---|
 | B1c | Generar link desde factura | Factura confirmada → Acción → Generar Link | Link `https://checkout.ranty.io/link/...` en el wizard y posteado al chatter | ⬜ |
 | B2c | Generar link desde pedido de venta | Ídem sobre `sale.order` | Ídem | ⬜ |
-| B3c | Pago del link → conciliación | Abrir el link en incógnito y pagar | Webhook llega, **factura pasa a Pagada**. 🚫 Hoy: 500 + reintentos + factura impaga (B1) | ⬜ |
+| B3c | Pago del link → conciliación | Abrir el link en incógnito y pagar | Webhook llega, **factura pasa a Pagada**. 🚫 Hoy: 500 + reintentos + factura impaga (B1) | ✅ 2026-10-09, producción, desde el portal de la factura: aviso aplicado, factura con saldo $0 y pago en Banco. §3.48 |
 | B4c | Duración del link | Probar 24 h, 48 h y 168 h (las tres opciones del panel, §3.9.g) | El link expira al plazo indicado. Verificar el estado que notifica Nave | ⬜ |
 | B5c | Duración inválida | `duration_hours = 0`, negativo, o > 168 | Debería rechazarse; **hoy no hay validación** (`nave_link_wizard.py:71-75`). El tope razonable es 168 h (§3.9.g) | ⬜ |
 | B6c | Regenerar link de la misma factura | Generar dos veces | Mismo `external_payment_id` truncado (`:179`). **El panel dice que cada link es único y de un solo uso** (§3.9.h) → verificar si Nave lo rechaza | ⬜ |
