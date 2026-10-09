@@ -527,6 +527,51 @@ class PaymentTransaction(models.Model):
         netloc = f"{host}:{parsed.port}" if parsed.port else host
         return urlunparse(parsed._replace(scheme='https', netloc=netloc))
 
+    def _nave_check_payment_owner(self, payment_id, payment_data):
+        """ Lanza ValidationError si el pago que confirmó Nave no es de esta transacción.
+
+        El webhook no viene firmado: cualquiera puede mandar la referencia de una transacción con el
+        `payment_id` de un pago aprobado de otra venta, y Nave lo va a confirmar como aprobado. Así,
+        en una prueba local, una transacción de $50 cancelada quedó pagada con un pago de $150
+        ajeno (plan de homologación §3.44). Lo que identifica al pago son los datos que devuelve
+        Nave, nunca los del aviso: `external_payment_id`, la referencia que mandó Odoo al crear la
+        intención, y `payment_request_id`, la intención.
+
+        Cualquier dato presente que contradiga la transacción la rechaza; basta uno que coincida
+        para aceptarla, porque el ejemplo de pago del checkout no trae `payment_request_id`. Sin
+        ninguno, el pago no se puede atribuir y tampoco se aplica: si es real, la transacción queda
+        pendiente y el error a la vista. ValidationError hace que el webhook acuse con 200 (no tiene
+        sentido que Nave reintente) y que la conciliación periódica lo registre y siga.
+        """
+        self.ensure_one()
+        referencia = (payment_data.get('external_payment_id') or '').strip()
+        intencion = (payment_data.get('payment_request_id') or '').strip()
+        propia = self.nave_payment_request_id or ''
+
+        contradice = (
+            (referencia and referencia != self.reference)
+            or (intencion and propia and intencion != propia)
+        )
+        if contradice:
+            _logger.warning(
+                "[payment_nave] Aviso sospechoso: el pago %s no es de la transacción %s "
+                "(referencia del pago %r, intención del pago %r, intención de la transacción %r). "
+                "No se aplica.", payment_id, self.reference, referencia or None, intencion or None,
+                propia or None,
+            )
+            raise ValidationError(
+                f"Nave: el pago {payment_id} no pertenece a la transacción {self.reference}."
+            )
+
+        if not referencia and not (intencion and propia):
+            _logger.error(
+                "[payment_nave] Nave no informa a qué transacción pertenece el pago %s; no se aplica "
+                "a %s. Revisar el pago en el panel de Nave.", payment_id, self.reference,
+            )
+            raise ValidationError(
+                f"Nave: el pago {payment_id} no trae datos para atribuirlo a {self.reference}."
+            )
+
     def _process_notification_data(self, notification_data):
         """
         Procesa los datos recibidos del Webhook.
@@ -573,6 +618,8 @@ class PaymentTransaction(models.Model):
                 "queda como estaba. Error: %s", payment_id, self.reference, e,
             )
             raise
+
+        self._nave_check_payment_owner(payment_id, payment_data)
 
         # Evaluar estado devuelto por la API oficial
         status_info = payment_data.get('status', {})

@@ -9,6 +9,7 @@ from unittest.mock import patch, MagicMock
 import requests
 
 from odoo import Command, fields
+from odoo.exceptions import ValidationError
 from odoo.tests import tagged
 from odoo.addons.payment.tests.common import PaymentCommon
 
@@ -193,7 +194,7 @@ class TestNaveProvider(PaymentCommon):
         """Verifica que un webhook APPROVED con GET de validación concilia la transacción."""
         mock_get.return_value = MagicMock(
             json=MagicMock(return_value={
-                'id': 'pay-nave-approved-001',
+                'id': 'pay-nave-approved-001', 'external_payment_id': 'TEST-NAVE-WH-001',
                 'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
                 'wallet': {'name': 'mercado pago'},
                 'amount': {'currency': 'ARS', 'value': '1500.00'},
@@ -231,7 +232,7 @@ class TestNaveProvider(PaymentCommon):
         """Verifica que un webhook REJECTED cancela la transacción en Odoo."""
         mock_get.return_value = MagicMock(
             json=MagicMock(return_value={
-                'id': 'pay-nave-rejected-001',
+                'id': 'pay-nave-rejected-001', 'external_payment_id': 'TEST-NAVE-WH-002',
                 'status': {'name': 'REJECTED', 'reason_code': 'insufficient_funds'},
                 'amount': {'currency': 'ARS', 'value': '1500.00'},
             }),
@@ -415,6 +416,7 @@ class TestNaveProvider(PaymentCommon):
 
         # Nave notifica con el external_payment_id que le mandamos.
         external_payment_id = mock_post.call_args[1]['json']['external_payment_id']
+        mock_get.return_value.json.return_value['external_payment_id'] = external_payment_id
         tx = self.env['payment.transaction']._get_tx_from_notification_data(
             'nave', {'external_payment_id': external_payment_id, 'payment_id': 'pay-link-011'}
         )
@@ -506,7 +508,7 @@ class TestNaveProvider(PaymentCommon):
         servidor propio que responda APPROVED y dar por pagada una factura ajena.
         """
         mock_get.return_value = MagicMock(
-            json=MagicMock(return_value={'id': 'pay-evil', 'status': {'name': 'APPROVED'}}),
+            json=MagicMock(return_value={'id': 'pay-evil', 'external_payment_id': 'TEST-NAVE-SSRF-001', 'status': {'name': 'APPROVED'}}),
             raise_for_status=MagicMock(return_value=None),
         )
         self._nave_arm_token()
@@ -531,7 +533,7 @@ class TestNaveProvider(PaymentCommon):
     def test_15_webhook_check_url_lookalike_is_ignored(self, mock_get):
         """Un dominio que sólo se parece al de Nave tampoco se acepta."""
         mock_get.return_value = MagicMock(
-            json=MagicMock(return_value={'id': 'pay-x', 'status': {'name': 'APPROVED'}}),
+            json=MagicMock(return_value={'id': 'pay-x', 'external_payment_id': 'TEST-NAVE-SSRF-002', 'status': {'name': 'APPROVED'}}),
             raise_for_status=MagicMock(return_value=None),
         )
         self._nave_arm_token()
@@ -555,6 +557,7 @@ class TestNaveProvider(PaymentCommon):
         mock_get.return_value = MagicMock(
             json=MagicMock(return_value={
                 'id': 'pay-ok',
+                'external_payment_id': 'TEST-NAVE-SSRF-003',
                 'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
                 'wallet': {'name': 'modo'},
             }),
@@ -579,7 +582,7 @@ class TestNaveProvider(PaymentCommon):
     def test_17_webhook_check_url_drops_userinfo(self, mock_get):
         """Se descarta el userinfo de la URL, que sólo sirve para confundir al que lee el log."""
         mock_get.return_value = MagicMock(
-            json=MagicMock(return_value={'id': 'pay-u', 'status': {'name': 'APPROVED'}}),
+            json=MagicMock(return_value={'id': 'pay-u', 'external_payment_id': 'TEST-NAVE-SSRF-004', 'status': {'name': 'APPROVED'}}),
             raise_for_status=MagicMock(return_value=None),
         )
         self._nave_arm_token()
@@ -659,7 +662,7 @@ class TestNaveProvider(PaymentCommon):
             # 2) la verificación del pago, el mismo camino que usa el webhook
             MagicMock(
                 json=MagicMock(return_value={
-                    'id': 'pay-cron-001',
+                    'id': 'pay-cron-001', 'external_payment_id': 'TEST-NAVE-CRON-001',
                     'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
                     'wallet': {'name': 'modo'},
                 }),
@@ -733,7 +736,7 @@ class TestNaveProvider(PaymentCommon):
                 )
             return MagicMock(
                 json=MagicMock(return_value={
-                    'id': 'pay-cron-005',
+                    'id': 'pay-cron-005', 'external_payment_id': 'TEST-NAVE-CRON-005',
                     'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
                 }),
                 raise_for_status=MagicMock(return_value=None),
@@ -950,10 +953,12 @@ class TestNaveProvider(PaymentCommon):
     # 11. VARIOS INTENTOS SOBRE LA MISMA INTENCIÓN
     # ──────────────────────────────────────────────
 
-    def _nave_verificacion(self, status_name, reason_code='transaction_successful', payment_id='pay-x'):
+    def _nave_verificacion(self, status_name, reason_code='transaction_successful', payment_id='pay-x',
+                           reference=None):
         return MagicMock(
             json=MagicMock(return_value={
                 'id': payment_id,
+                'external_payment_id': reference,
                 'status': {'name': status_name, 'reason_code': reason_code},
             }),
             raise_for_status=MagicMock(return_value=None),
@@ -970,14 +975,14 @@ class TestNaveProvider(PaymentCommon):
         tx = self._nave_make_tx('TEST-NAVE-RETRY-001')
 
         # Primer intento: rechazado.
-        mock_get.return_value = self._nave_verificacion('REJECTED', 'no_amount_available', 'pay-rechazado')
+        mock_get.return_value = self._nave_verificacion('REJECTED', 'no_amount_available', 'pay-rechazado', reference='TEST-NAVE-RETRY-001')
         tx._process_notification_data({
             'payment_id': 'pay-rechazado', 'external_payment_id': 'TEST-NAVE-RETRY-001',
         })
         self.assertEqual(tx.state, 'cancel')
 
         # Segundo intento sobre la misma intención: aprobado.
-        mock_get.return_value = self._nave_verificacion('APPROVED', payment_id='pay-aprobado')
+        mock_get.return_value = self._nave_verificacion('APPROVED', payment_id='pay-aprobado', reference='TEST-NAVE-RETRY-001')
         tx._process_notification_data({
             'payment_id': 'pay-aprobado', 'external_payment_id': 'TEST-NAVE-RETRY-001',
         })
@@ -992,18 +997,18 @@ class TestNaveProvider(PaymentCommon):
         self._nave_arm_token()
 
         directo = self._nave_make_tx('TEST-NAVE-RETRY-002')
-        mock_get.return_value = self._nave_verificacion('APPROVED', payment_id='pay-directo')
+        mock_get.return_value = self._nave_verificacion('APPROVED', payment_id='pay-directo', reference='TEST-NAVE-RETRY-002')
         directo._process_notification_data({
             'payment_id': 'pay-directo', 'external_payment_id': 'TEST-NAVE-RETRY-002',
         })
         self.assertNotIn('rechazado', directo.state_message or '')
 
         recuperada = self._nave_make_tx('TEST-NAVE-RETRY-003')
-        mock_get.return_value = self._nave_verificacion('REJECTED', 'denied', 'pay-r')
+        mock_get.return_value = self._nave_verificacion('REJECTED', 'denied', 'pay-r', reference='TEST-NAVE-RETRY-003')
         recuperada._process_notification_data({
             'payment_id': 'pay-r', 'external_payment_id': 'TEST-NAVE-RETRY-003',
         })
-        mock_get.return_value = self._nave_verificacion('APPROVED', payment_id='pay-ok')
+        mock_get.return_value = self._nave_verificacion('APPROVED', payment_id='pay-ok', reference='TEST-NAVE-RETRY-003')
         recuperada._process_notification_data({
             'payment_id': 'pay-ok', 'external_payment_id': 'TEST-NAVE-RETRY-003',
         })
@@ -1018,13 +1023,13 @@ class TestNaveProvider(PaymentCommon):
         self._nave_arm_token()
         tx = self._nave_make_tx('TEST-NAVE-RETRY-004')
 
-        mock_get.return_value = self._nave_verificacion('APPROVED', payment_id='pay-ok')
+        mock_get.return_value = self._nave_verificacion('APPROVED', payment_id='pay-ok', reference='TEST-NAVE-RETRY-004')
         tx._process_notification_data({
             'payment_id': 'pay-ok', 'external_payment_id': 'TEST-NAVE-RETRY-004',
         })
         self.assertEqual(tx.state, 'done')
 
-        mock_get.return_value = self._nave_verificacion('REJECTED', 'denied', 'pay-viejo')
+        mock_get.return_value = self._nave_verificacion('REJECTED', 'denied', 'pay-viejo', reference='TEST-NAVE-RETRY-004')
         with self.assertLogs('odoo.addons.payment_nave.models.payment_transaction', 'WARNING') as logs:
             tx._process_notification_data({
                 'payment_id': 'pay-viejo', 'external_payment_id': 'TEST-NAVE-RETRY-004',
@@ -1078,7 +1083,7 @@ class TestNaveProvider(PaymentCommon):
         self._nave_arm_token()
         tx = self._nave_make_tx(reference)
         mock_get.return_value = MagicMock(
-            json=MagicMock(return_value=payload),
+            json=MagicMock(return_value={**payload, 'external_payment_id': reference}),
             raise_for_status=MagicMock(return_value=None),
         )
         tx._process_notification_data({
@@ -1183,7 +1188,7 @@ class TestNaveProvider(PaymentCommon):
         self._nave_arm_token()
         tx = self._nave_make_tx('TEST-NAVE-REPEAT-001')
 
-        mock_get.return_value = self._nave_verificacion('APPROVED', payment_id='pay-ok')
+        mock_get.return_value = self._nave_verificacion('APPROVED', payment_id='pay-ok', reference='TEST-NAVE-REPEAT-001')
         datos = {'payment_id': 'pay-ok', 'external_payment_id': 'TEST-NAVE-REPEAT-001'}
         tx._process_notification_data(datos)
         self.assertEqual(tx.state, 'done')
@@ -1553,7 +1558,7 @@ class TestNaveProvider(PaymentCommon):
                 raise requests.exceptions.Timeout("Nave no respondió")
             return MagicMock(
                 json=MagicMock(return_value={
-                    'id': 'pay-cron-007',
+                    'id': 'pay-cron-007', 'external_payment_id': 'TEST-NAVE-CRON-007',
                     'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
                 }),
                 raise_for_status=MagicMock(return_value=None),
@@ -1565,3 +1570,122 @@ class TestNaveProvider(PaymentCommon):
 
         self.assertEqual(failing.state, 'pending', "Queda para la corrida siguiente")
         self.assertEqual(healthy.state, 'done', "El resto del lote se concilia igual")
+
+    # ──────────────────────────────────────────────
+    # 13. EL PAGO VERIFICADO TIENE QUE SER DE LA TRANSACCIÓN
+    # ──────────────────────────────────────────────
+
+    def _nave_tx_cancelada(self, reference, request_id='pr-propia'):
+        self._nave_arm_token()
+        tx = self._nave_make_tx(reference)
+        tx.write({'nave_payment_request_id': request_id})
+        tx._set_canceled()
+        return tx
+
+    def _nave_pago_aprobado(self, mock_get, **datos):
+        mock_get.return_value = MagicMock(
+            json=MagicMock(return_value={
+                'id': 'pago-de-otra-venta',
+                'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
+                **datos,
+            }),
+            raise_for_status=MagicMock(return_value=None),
+        )
+
+    def _nave_avisar(self, tx):
+        tx._process_notification_data({
+            'payment_id': 'pago-de-otra-venta', 'external_payment_id': tx.reference,
+        })
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_62_un_pago_de_otra_venta_no_paga_esta(self, mock_get):
+        """El agujero de E1c: el aviso trae nuestra referencia y el payment_id de otra venta."""
+        tx = self._nave_tx_cancelada('TEST-NAVE-OWNER-001')
+        self._nave_pago_aprobado(mock_get, external_payment_id='OTRA-VENTA-150',
+                                 payment_request_id='otra-intencion')
+
+        with self.assertLogs('odoo.addons.payment_nave.models.payment_transaction', 'WARNING') as logs, \
+                self.assertRaises(ValidationError):
+            self._nave_avisar(tx)
+
+        self.assertEqual(tx.state, 'cancel')
+        self.assertFalse(tx.nave_payment_id)
+        self.assertIn('Aviso sospechoso', '\n'.join(logs.output))
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_63_la_referencia_coincide_pero_la_intencion_no(self, mock_get):
+        tx = self._nave_tx_cancelada('TEST-NAVE-OWNER-002')
+        self._nave_pago_aprobado(mock_get, external_payment_id='TEST-NAVE-OWNER-002',
+                                 payment_request_id='otra-intencion')
+
+        with self.assertRaises(ValidationError):
+            self._nave_avisar(tx)
+
+        self.assertEqual(tx.state, 'cancel')
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_64_sin_datos_para_atribuirlo_no_se_aplica(self, mock_get):
+        """Si Nave no dice de quién es el pago, no se aplica y queda un error a la vista."""
+        tx = self._nave_tx_cancelada('TEST-NAVE-OWNER-003')
+        self._nave_pago_aprobado(mock_get)
+
+        with self.assertLogs('odoo.addons.payment_nave.models.payment_transaction', 'ERROR') as logs, \
+                self.assertRaises(ValidationError):
+            self._nave_avisar(tx)
+
+        self.assertEqual(tx.state, 'cancel')
+        self.assertIn('no informa a qué transacción pertenece', '\n'.join(logs.output))
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_65_basta_la_referencia_si_no_viene_la_intencion(self, mock_get):
+        """El ejemplo de pago del checkout no trae payment_request_id: con la referencia alcanza."""
+        tx = self._nave_tx_cancelada('TEST-NAVE-OWNER-004')
+        self._nave_pago_aprobado(mock_get, external_payment_id='TEST-NAVE-OWNER-004')
+
+        self._nave_avisar(tx)
+
+        self.assertEqual(tx.state, 'done')
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_66_basta_la_intencion_si_no_viene_la_referencia(self, mock_get):
+        tx = self._nave_tx_cancelada('TEST-NAVE-OWNER-005', request_id='pr-owner-005')
+        self._nave_pago_aprobado(mock_get, payment_request_id='pr-owner-005')
+
+        self._nave_avisar(tx)
+
+        self.assertEqual(tx.state, 'done')
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_67_la_conciliacion_no_aplica_un_pago_de_otra_transaccion(self, mock_get):
+        """La intención devuelve un pago ajeno: esa transacción sigue pendiente y el lote sigue."""
+        self._nave_arm_token()
+        ajena = self._nave_make_stale_tx('TEST-NAVE-CRON-008', 'pr-cron-008')
+        sana = self._nave_make_stale_tx('TEST-NAVE-CRON-009', 'pr-cron-009')
+
+        def _dispatch(url, **kwargs):
+            for sufijo in ('008', '009'):
+                if f'pr-cron-{sufijo}' in url:
+                    return MagicMock(
+                        json=MagicMock(return_value={
+                            'id': f'pr-cron-{sufijo}',
+                            'status': {'name': 'SUCCESS_PROCESSED'},
+                            'payment_attempts': {'payments': [{'payment_id': f'pay-cron-{sufijo}'}]},
+                        }),
+                        raise_for_status=MagicMock(return_value=None),
+                    )
+            referencia = 'OTRA-VENTA' if 'pay-cron-008' in url else 'TEST-NAVE-CRON-009'
+            return MagicMock(
+                json=MagicMock(return_value={
+                    'id': url.rsplit('/', 1)[-1],
+                    'external_payment_id': referencia,
+                    'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
+                }),
+                raise_for_status=MagicMock(return_value=None),
+            )
+
+        mock_get.side_effect = _dispatch
+
+        self.env['payment.transaction']._cron_nave_poll_pending_transactions()
+
+        self.assertEqual(ajena.state, 'pending', "Un pago ajeno no la cierra")
+        self.assertEqual(sana.state, 'done', "El resto del lote se concilia igual")

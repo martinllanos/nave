@@ -15,6 +15,7 @@ REQUESTS_GET = 'odoo.addons.payment_nave.models.payment_transaction.requests.get
 
 PAGO_APROBADO = {
     'id': 'pay-wh-001',
+    'external_payment_id': 'TEST-NAVE-WEBHOOK-001',
     'status': {'name': 'APPROVED', 'reason_code': 'transaction_successful'},
     'payment_method': {
         'type': 'card_payment', 'card_brand': 'VISA', 'card_type': 'CREDIT', 'card_last4': '0231',
@@ -128,3 +129,15 @@ class TestNaveWebhook(PaymentHttpCommon):
 
         self.assertEqual(response.status_code, 400)
         self.assertFalse(self._errores(logs), "Un JSON roto no es un error de Odoo")
+
+    @patch(REQUESTS_GET)
+    def test_06_pago_de_otra_venta_se_acusa_y_no_se_aplica(self, mock_get):
+        """Por HTTP: el aviso con un pago ajeno responde 200 (reintentar no cambia nada) y no paga."""
+        mock_get.return_value = self._respuesta({**PAGO_APROBADO, 'external_payment_id': 'OTRA-VENTA'})
+
+        response = self._post(self.tx.reference)
+
+        self.assertEqual(response.status_code, 200)
+        self.tx.invalidate_recordset()
+        self.assertEqual(self.tx.state, 'pending')
+        self.assertFalse(self.tx.nave_card_brand)
