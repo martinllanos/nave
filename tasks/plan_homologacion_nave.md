@@ -458,6 +458,26 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.45 E3c: quién ve las credenciales de Nave (2026-10-09)
+
+Verificado en producción con usuarios temporales de cada perfil, creados y descartados en la misma
+transacción, sin guardar nada. Cada uno leyó el proveedor Nave y el método de pago Nave Point:
+
+| Perfil | Proveedor Nave | Qué ve |
+|---|---|---|
+| Administrador (`base.group_system`) | ✅ lee y edita | Todo. El *Client Secret* se muestra enmascarado (`password="True"`) |
+| Responsable de POS | ✅ sólo lectura (lo habilita `pos_online_payment`) | *Client ID*, los dos `pos_id` y el vencimiento del token. **No** ve el *Client Secret* ni el token cacheado |
+| Cajero (usuario de POS) | ❌ sin acceso | Sólo el `pos_id` de la terminal en el método de pago, que el POS necesita para cobrar |
+| Contabilidad o Ventas, como administradores de su área | ❌ sin acceso | Nada |
+
+**Conclusión: ✅.** El secreto y el token sólo los ve un administrador. Los demás usan el proveedor a
+través del módulo, que lo lee con permisos del sistema, sin exponerlo.
+
+El *Client ID* que ve el responsable de POS no es una credencial por sí solo: en OAuth es el
+identificador público de la aplicación y no sirve sin el secreto. Los `pos_id` tampoco son secretos:
+el del QR va impreso dentro del código del cartel. Restringirlos a administradores es posible, pero no
+cambia la seguridad; queda anotado como mejora opcional.
+
 ### 3.44 E1c: el SSRF está cerrado, pero el pago verificado no se ata a la transacción (2026-10-09)
 
 **E1c, en producción.** Se mandó al webhook un aviso falso con la referencia `A5-S00041` (pedido de
@@ -2301,7 +2321,7 @@ deciden cómo se escribe el fix de B11.
 |---|---|---|---|---|
 | E1c | SSRF vía `payment_check_url` 🔴 | POST al webhook con una `reference` válida y `payment_check_url` apuntando a un host propio que responda `APPROVED` | **Debe rechazarse.** Hoy se marca la factura como pagada (B5) | ✅ 2026-10-09, producción: la URL ajena se ignora y no se visita. El pago verificado tiene que ser de la transacción: un aviso con el pago real de otra venta se registra como sospechoso y no se aplica (`18.0.1.12.5`). §3.44 |
 | E2c | Webhook sin autenticación | POST anónimo con datos plausibles | Mitigado sólo por el GET de verificación. Documentar la postura ante Nave | ✅ 2026-10-09: Nave no firma el webhook, pero un aviso sólo se aplica si Nave confirma el pago **y** el pago es de esa transacción (§3.44). Es la postura para presentarle a Nave |
-| E3c | Secret expuesto | Usuario sin `base.group_system` abre el provider | `nave_client_secret` oculto; **`nave_client_id` no tiene `groups`** y sí se ve (`payment_provider.py:21-25`) | ⬜ |
+| E3c | Secret expuesto | Usuario sin `base.group_system` abre el provider | `nave_client_secret` oculto; **`nave_client_id` no tiene `groups`** y sí se ve (`payment_provider.py:21-25`) | ✅ 2026-10-09, producción: el *Client Secret* y el token sólo los ve un administrador. El responsable de POS lee el *Client ID* y los `pos_id`, que no son secretos; el cajero, contabilidad y ventas no acceden al proveedor. §3.45 |
 | E4c | Bandit sobre los tres módulos | E0.4 | 0 hallazgos ≥ medio | ✅ **0 issues** (2026-09-21). ⚠️ Bandit **no detecta el SSRF de B5**: pasar este chequeo no sustituye a E1c | ⬜ |
 
 ### Bloque F — Contabilidad y conciliación
@@ -2354,7 +2374,7 @@ Lo primero que se presenta a Nave. Lo que queda afuera no se descarta: se homolo
 | Nave Point con *Código QR* en la terminal | C2 con QR | ✅ 2026-10-08, cobro real con MODO (§3.41) |
 | Nave QR fijo | H1 a H8, H10 | ✅ H1, H2, H4 a H8 y H10 (§3.40 y §3.43) |
 | Webhook de los pagos del POS | — | ✅ 2026-10-08: responde 200 y Nave no reintenta (§3.39) |
-| Seguridad del webhook | E1c a E3c | ✅ E1c y E2c (§3.44). E3c ⬜ |
+| Seguridad del webhook | E1c a E3c | ✅ E1c, E2c (§3.44) y E3c (§3.45) |
 | Robustez del webhook | D2c a D6c | D2c a D4c ✅; D5c y D6c ⬜ |
 | Contabilidad y cierre de caja | F1 a F4, C15 | ✅ C15, F2 y F4 (§3.42). ⚠️ La comisión que Nave descuenta del neto no queda asentada. F1 y F3 ⬜ |
 | Calidad | E0.1 a E0.4, E4c | ✅ en cada commit |
