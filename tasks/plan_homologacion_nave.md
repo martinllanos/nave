@@ -458,6 +458,33 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.47 Primer cobro online en producción: la tienda no ofrece tarjeta (2026-10-09)
+
+Pedido `S00017`, $1.100, en `www.onlyone.ar/shop`, eligiendo **Tarjeta** en Odoo. Evidencia en
+`docs/homologacion/evidencias/A_produccion/`.
+
+| Paso | Resultado |
+|---|---|
+| Intención | `POST /api/payment_request/ecommerce` con el `pos_id` de la tienda, referencia `S00017-3` |
+| Página de Nave | ⚠️ Sólo ofrece **Código QR**, aunque en Odoo se eligió Tarjeta. Se pagó por QR con Belo |
+| Aviso de Nave | ✅ 06:03:49 UTC, `APPROVED`, 200, sin reintentos |
+| Control de pertenencia (§3.44) | ✅ El pago de producción trae `external_payment_id = S00017-3` y la intención correcta: el control lo acepta. Queda descartado el riesgo anotado en el diseño para el checkout |
+| Odoo | ✅ Transacción pagada, pedido confirmado, pago `PBNK1/2026/00014` en Banco, cupón `KXY194305176`. El cliente volvió por `/payment/nave/return` a `/payment/status` |
+
+**La tienda de producción no tiene tarjeta habilitada.** La página de pago de Nave muestra los medios
+que Nave tiene habilitados para la tienda. La intención trae dos gateways (`sonqo`, Galicia
+adquirencia, y `coelsa`), pero la página sólo ofrece QR. En sandbox ofrecía los dos (A0). Hay que
+pedirle a integraciones@ que habilite **tarjeta** para la tienda e-commerce.
+
+**Hallazgos de Odoo:**
+
+- **Odoo no le dice a Nave qué medio eligió el cliente.** *Tarjeta* y *QR Interoperable Nave* abren la
+  misma página. Preguntar a Nave si el checkout se puede abrir con un medio preseleccionado. Si no se
+  puede, conviene mostrar un solo medio, *Nave*, en la tienda.
+- **La transacción quedó con el medio *Tarjeta*** aunque se pagó con QR y billetera (*bind pago*). Con
+  tarjeta, el módulo corrige el medio según la marca (`_nave_apply_card_brand`); con billetera no lo
+  cambia. Debería pasar a *QR Interoperable Nave*.
+
 ### 3.46 D5c, D6c, F1 y F3 (2026-10-09)
 
 **F1 — asiento del cobro online ✅** (producción, sólo lectura). Las 11 transacciones online pagadas de

@@ -241,6 +241,23 @@ cancelación desde Odoo funcionó hasta ahora (`plan_homologacion_nave.md` §3.3
 
 ---
 
+## 8d. La tienda online de producción sólo ofrece QR
+
+**Qué pasa.** En producción, la página de pago de una intención `ecommerce` sólo ofrece *Código QR*,
+aunque la intención trae los gateways `sonqo` (Galicia adquirencia) y `coelsa`. En sandbox ofrecía QR
+y tarjeta (`plan_homologacion_nave.md` §3.47).
+
+**Preguntas:**
+
+1. ¿Nos pueden habilitar **tarjeta** en la tienda e-commerce de producción? ¿Es un trámite con
+   integraciones@?
+2. ¿La página de pago se puede abrir con un medio preseleccionado, por ejemplo con un parámetro en la
+   intención o en la URL? En Odoo el cliente elige *Tarjeta* o *QR* antes de ir a Nave.
+
+- Respuesta:
+
+---
+
 ## 9. Observaciones menores para ellos
 
 - **Cupón de rechazo con datos inconsistentes.** El cupón de la prueba C3 dice *"VISA CREDIT 3370"*
