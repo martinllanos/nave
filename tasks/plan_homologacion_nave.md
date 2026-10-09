@@ -458,6 +458,45 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.43 H8: errores al crear el cobro con QR (2026-10-09)
+
+**Lo que documenta Nave hoy** (página del QR interoperable, *Códigos de errores*; leída del
+`chunk-3SROTMK6.js` el 2026-10-09). Son errores al **crear** la intención, no desenlaces de un pago:
+
+| Código | Qué significa, según Nave | HTTP del ejemplo |
+|---|---|---|
+| `ERROR_ENCODE_DYNAMIC_QR` | Falló la generación del QR (*"Error-timeout of 2500ms exceeded"*) | 500 |
+| `NO_GATEWAYS_AVAILABLE` | Ningún gateway del tipo de pago está disponible | 409 |
+| `PAYMENT_TYPE_IS_NOT_OPERATIVE` | El circuito del tipo de pago está fuera de servicio | 503 |
+| `INVALID_POS` | El `pos_id` es de otro tipo de integración | 409 |
+| `APPLICATION_ERROR_SERVICE` | No hay aplicación asociada al `client_id` | 404 |
+| `CLIENT_VALIDATION_FAILED` | Faltan campos o son inválidos | 404 |
+| `INTERNAL_SERVER_ERROR` | Error genérico, por ejemplo un JSON mal formado | 500 |
+
+La página de Nave Point documenta un subconjunto con otra forma: `api_status_error` (*"Payment type
+is not operational"*), `invalid_pos` e `internal_server_error`.
+
+**Lo que devuelve la API de verdad.** Sólo se puede provocar `INVALID_POS`. Sondeado en producción
+con un cobro de $15 que Nave rechazó, sin tocar la configuración:
+
+- QR con el `pos_id` de la terminal → `400 {"code":"invalid_pos","message":"Given POS is for a different payment type"}`
+- Nave Point con el `pos_id` del QR → la misma respuesta
+
+La forma real es la de Nave Point (`code` en minúsculas, HTTP 400), no la del ejemplo del QR
+(`message` en mayúsculas, 409). `payment_nave` ya contempla las dos formas para registrar
+`invalid_pos` en los cobros online (`_nave_log_invalid_pos`, test 34).
+
+**Lo que ve hoy el cajero.** `_nave_error_message` arma el texto con lo que mande Nave. Para
+`invalid_pos`, el cajero lee *"Given POS is for a different payment type (HTTP 400)"*. Para
+`ERROR_ENCODE_DYNAMIC_QR` leería *"ERROR_ENCODE_DYNAMIC_QR: Error-timeout of 2500ms exceeded
+(HTTP 500)"*. Está en inglés, es técnico y no dice qué hacer. H8 pide un mensaje claro. Tampoco se
+registra el `invalid_pos` con el medio y el `pos_id`, como sí se hace en los cobros online.
+
+**Para resolver:** un catálogo de errores al crear el cobro, que reconozca las dos formas, con un
+mensaje en castellano que diga qué pasó y qué hacer, y el código para soporte. Es el mismo criterio
+de *speak-to-the-cashier-not-the-api*. Los errores que no se pueden provocar se prueban con las
+respuestas documentadas.
+
 ### 3.42 Cierre de caja y asientos del POS (2026-10-09)
 
 Cierre de la sesión `POS/00001`, abierta desde el 2026-10-06: 16 órdenes por $5.154,34, todas
@@ -2170,7 +2209,7 @@ deciden cómo se escribe el fix de B11.
 | H5 | Pago con billetera real | Escanear el QR físico desde una app | Mismo resultado que H3 | ✅ 2026-10-08, POS 1/0014: Belo mostró los $147 ya cargados, Nave aprobó y Odoo lo registró en la consulta siguiente. Factura `FA-C 00001-00000017`. §3.40 |
 | H6 | Expiración | Crear intención y esperar el `duration_time` | `EXPIRED` manejado sin loop (depende de B11/B4) | ✅ 2026-10-08: `EXPIRED` a los 5 min (19:07:00 → 19:12:03 UTC). *"Cobro expirado"*, línea reintentable, sin loop. §3.40 |
 | H7 | Cancelar intención | Cancelar desde el POS | `DELETE /api/payment_requests/{id}`, el QR deja de cobrar | ✅ 2026-10-08, exploratorio: Nave aceptó la baja de una intención `static_qr` desde Odoo (03:56 UTC). Un QR impreso no tiene pantalla que vuelva a reposo |
-| H8 | Errores propios de QR | Forzar la condición | `ERROR_ENCODE_DYNAMIC_QR` y `NO_GATEWAYS_AVAILABLE` con mensaje claro al cajero (`doc_qr.md` §9) | ⬜ |
+| H8 | Errores propios de QR | Forzar la condición | `ERROR_ENCODE_DYNAMIC_QR` y `NO_GATEWAYS_AVAILABLE` con mensaje claro al cajero (`doc_qr.md` §9) | 🔴 2026-10-09: el cajero ve el error de Nave en inglés y sin indicación de qué hacer. Sólo `invalid_pos` se puede provocar, y la API lo devuelve con otra forma que la documentada. §3.43 |
 | H9 | Devolución | Devolver un pago QR aprobado | `DELETE /api/payments/{payment_id}` → `CANCELLING` → estado final asincrónico | ⬜ |
 | H10 | Path de auth | Capturar el request de token | `doc_qr.md` §2 usa `m2ms`, el código usa `m2msPrivate` (N3) | ✅ 2026-10-08: en producción el token sale de `m2msPrivate` y el QR cobra con él |
 
