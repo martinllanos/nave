@@ -60,11 +60,23 @@ class PaymentNaveController(http.Controller):
             with request.env.cr.savepoint():
                 request.env['payment.transaction'].sudo()._handle_notification_data('nave', data)
         except ValidationError as e:
-            _logger.info(
-                "[payment_nave] Aviso de Nave que no corresponde a ninguna transacción del sitio "
-                "(puede ser un cobro del punto de venta); se acusa sin aplicar. Referencia: %s. "
-                "Pago: %s. Motivo: %s", external_payment_id, payment_id, e,
-            )
+            # Hay dos casos: el aviso no es de ninguna transacción del sitio (por ejemplo, un cobro del
+            # punto de venta), o es de una transacción pero no se aplica (un pago ajeno, §3.44). El
+            # segundo ya dejó su advertencia; mencionar el punto de venta ahí confundía.
+            existe = request.env['payment.transaction'].sudo().search_count([
+                ('reference', '=', external_payment_id), ('provider_code', '=', 'nave'),
+            ])
+            if existe:
+                _logger.info(
+                    "[payment_nave] Aviso de Nave que no se aplica; se acusa sin aplicar. Referencia: %s. "
+                    "Pago: %s. Motivo: %s", external_payment_id, payment_id, e,
+                )
+            else:
+                _logger.info(
+                    "[payment_nave] Aviso de Nave que no corresponde a ninguna transacción del sitio "
+                    "(puede ser un cobro del punto de venta); se acusa sin aplicar. Referencia: %s. "
+                    "Pago: %s. Motivo: %s", external_payment_id, payment_id, e,
+                )
         except Exception as e:
             _logger.error("Error al procesar la notificación del Webhook para %s: %s", external_payment_id, e)
             return request.make_response("Internal Server Error", [('Content-Type', 'text/plain')], status=500)

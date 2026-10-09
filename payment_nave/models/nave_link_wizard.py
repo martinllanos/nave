@@ -7,12 +7,17 @@
 import logging
 import requests
 
+from markupsafe import Markup
 from werkzeug import urls
 
 from odoo import Command, api, fields, models, _
-from odoo.exceptions import UserError
+from odoo.exceptions import UserError, ValidationError
 
 from .nave_payload import nave_product_entry
+
+# Validez de un link de pago, en horas. 168 es el máximo que ofrece el panel de Nave.
+NAVE_LINK_MIN_HOURS = 1
+NAVE_LINK_MAX_HOURS = 168
 
 _logger = logging.getLogger(__name__)
 
@@ -76,7 +81,8 @@ class NavePaymentLinkWizard(models.TransientModel):
     duration_hours = fields.Integer(
         string='Validez del Link (horas)',
         default=24,
-        help='Tiempo en horas durante el cual el link de pago estará activo. Máximo recomendado: 168h (1 semana).',
+        help='Tiempo en horas durante el cual el link de pago estará activo: de 1 a 168 (una semana), '
+             'que es el máximo que ofrece el panel de Nave.',
     )
     external_reference = fields.Char(
         string='Referencia Externa',
@@ -98,6 +104,17 @@ class NavePaymentLinkWizard(models.TransientModel):
     # ──────────────────────────────────────────────
     # Valores por defecto desde contexto
     # ──────────────────────────────────────────────
+
+    @api.constrains('duration_hours')
+    def _check_duration_hours(self):
+        """ La validez va de 1 a 168 horas. Nave toma 0 como 7 días (B5c), y el link quedaba vigente
+        mucho más de lo que se pidió. """
+        for wizard in self:
+            if not NAVE_LINK_MIN_HOURS <= wizard.duration_hours <= NAVE_LINK_MAX_HOURS:
+                raise ValidationError(_(
+                    "La validez del link tiene que estar entre %(min)s y %(max)s horas.",
+                    min=NAVE_LINK_MIN_HOURS, max=NAVE_LINK_MAX_HOURS,
+                ))
 
     @api.model
     def default_get(self, fields_list):
@@ -180,6 +197,10 @@ class NavePaymentLinkWizard(models.TransientModel):
 
         # Construir payload de productos
         products_payload = self._nave_build_products_payload()
+
+        # Un documento tiene un solo link cobrable: los pendientes anteriores se dan de baja en Nave
+        # antes de crear el nuevo. Si no, quedaban vivos y el cliente podía pagar dos veces (B6c).
+        self.env['payment.transaction'].sudo()._nave_cancel_pending_requests(self.move_id, self.sale_id)
 
         # La transacción se crea ANTES de llamar a Nave porque su referencia es el
         # external_payment_id que se envía. Si la llamada falla, la excepción revierte la creación.
@@ -433,13 +454,15 @@ class NavePaymentLinkWizard(models.TransientModel):
         Esto permite trazabilidad completa de los links enviados desde Odoo.
         """
         self.ensure_one()
-        msg = _(
-            "📎 <b>Link de Pago Nave generado:</b><br/>"
-            "<a href='%(url)s' target='_blank'>%(url)s</a><br/>"
-            "<small>Referencia: %(ref)s | Monto: %(amount)s ARS</small>",
-            url=checkout_url,
-            ref=transaction.reference,
-            amount=f"{self.amount:.2f}",
+        # El HTML es una plantilla fija; los textos traducidos y los datos entran como valores, que
+        # Markup escapa. Como texto común, Odoo 18 escapaba todo y el chatter mostraba las etiquetas
+        # crudas (§3.49). La traducción no puede meter HTML.
+        msg = Markup("📎 <b>%s</b><br/><a href='%s' target='_blank'>%s</a><br/><small>%s</small>") % (
+            _("Link de Pago Nave generado:"),
+            checkout_url,
+            checkout_url,
+            _("Referencia: %(ref)s | Monto: %(amount)s ARS",
+              ref=transaction.reference, amount=f"{self.amount:.2f}"),
         )
         doc = self.move_id or self.sale_id
         if doc and hasattr(doc, 'message_post'):

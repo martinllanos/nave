@@ -228,7 +228,9 @@ class PosPaymentMethod(models.Model):
                 "[pos_nave] Nave no aceptó el cobro %s %s (HTTP %s). Respuesta: %s",
                 destino, pos_id, getattr(response, 'status_code', '-'), self._nave_error_body(e) or e,
             )
-            provider._nave_log_invalid_pos(e, payment_type, pos_id)
+            provider._nave_log_invalid_pos(
+                e, payment_type, pos_id, hint="revisá el ID del punto de venta del método de pago",
+            )
             return {'error': True, 'message': self._nave_intent_error_message(e)}
 
     @api.model

@@ -135,7 +135,12 @@ class TestNaveWebhook(PaymentHttpCommon):
         """Por HTTP: el aviso con un pago ajeno responde 200 (reintentar no cambia nada) y no paga."""
         mock_get.return_value = self._respuesta({**PAGO_APROBADO, 'external_payment_id': 'OTRA-VENTA'})
 
-        response = self._post(self.tx.reference)
+        with self.assertLogs(CONTROLLER_LOGGER, level='INFO') as logs:
+            response = self._post(self.tx.reference)
+
+        registro = '\n'.join(r.getMessage() for r in logs.records)
+        self.assertIn("no se aplica", registro)
+        self.assertNotIn("punto de venta", registro, "Un aviso sospechoso no es un cobro del POS")
 
         self.assertEqual(response.status_code, 200)
         self.tx.invalidate_recordset()

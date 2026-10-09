@@ -219,7 +219,7 @@ class PaymentProvider(models.Model):
             return default_codes
         return NAVE_DEFAULT_PAYMENT_METHOD_CODES
 
-    def _nave_log_invalid_pos(self, exc, payment_type, pos_id):
+    def _nave_log_invalid_pos(self, exc, payment_type, pos_id, hint=None):
         """ Deja rastro de qué medio y qué `pos_id` produjeron un rechazo por identidad.
 
         Nave rechaza la intención cuyo `pos_id` pertenece a otro medio sin decir cuál de los
@@ -244,10 +244,11 @@ class PaymentProvider(models.Model):
         ).lower()
         if 'invalid_pos' not in marcas:
             return
+        # `hint` dice qué revisar: el POS toma el pos_id del método de pago, no del proveedor.
         _logger.error(
             "[payment_nave] Nave rechazó la intención por identidad: medio '%s', pos_id '%s'. "
-            "Ese pos_id pertenece a otro medio de cobro: revisá la configuración del proveedor.",
-            payment_type, pos_id,
+            "Ese pos_id pertenece a otro medio de cobro: %s.",
+            payment_type, pos_id, hint or "revisá la configuración del proveedor",
         )
 
     def _nave_get_pos_id(self, payment_type=None):

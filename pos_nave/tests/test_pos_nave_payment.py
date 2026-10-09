@@ -843,6 +843,8 @@ class TestPosNavePayment(TransactionCase):
         registro = ' '.join(r.getMessage() for r in logs.records)
         self.assertIn("static_qr", registro)
         self.assertIn("QR-POS-001", registro)
+        self.assertIn("revisá el ID del punto de venta del método de pago", registro)
+        self.assertNotIn("configuración del proveedor", registro)
 
     def test_44_qr_documented_shape_gets_the_same_treatment(self):
         """Con la forma de los ejemplos del QR, el código viene en `message`."""

@@ -1689,3 +1689,247 @@ class TestNaveProvider(PaymentCommon):
 
         self.assertEqual(ajena.state, 'pending', "Un pago ajeno no la cierra")
         self.assertEqual(sana.state, 'done', "El resto del lote se concilia igual")
+
+    # ──────────────────────────────────────────────
+    # 14. UN SOLO COBRO PENDIENTE POR DOCUMENTO
+    # ──────────────────────────────────────────────
+
+    def _nave_factura(self, monto=100.0):
+        return self.env['account.move'].create({
+            'move_type': 'out_invoice',
+            'partner_id': self.partner.id,
+            'currency_id': self.currency_ars.id,
+            'invoice_line_ids': [Command.create({'name': 'Prueba', 'quantity': 1, 'price_unit': monto})],
+        })
+
+    def _nave_cobro_pendiente(self, reference, invoice, request_id):
+        tx = self._nave_make_tx(reference)
+        tx.write({'invoice_ids': [Command.set(invoice.ids)], 'nave_payment_request_id': request_id})
+        tx._set_pending()
+        return tx
+
+    @staticmethod
+    def _nave_respuesta(status_code=200, body=None):
+        response = MagicMock(status_code=status_code, text=str(body or ''))
+        response.json.return_value = body or {}
+        if status_code >= 400:
+            response.raise_for_status.side_effect = requests.exceptions.HTTPError(response=response)
+        else:
+            response.raise_for_status.return_value = None
+        return response
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.delete')
+    def test_68_un_cobro_pendiente_hermano_se_da_de_baja(self, mock_delete):
+        self._nave_arm_token()
+        factura = self._nave_factura()
+        hermano = self._nave_cobro_pendiente('TEST-NAVE-SIB-001', factura, 'pr-sib-001')
+        otro_documento = self._nave_cobro_pendiente('TEST-NAVE-SIB-002', self._nave_factura(), 'pr-sib-002')
+        propio = self._nave_cobro_pendiente('TEST-NAVE-SIB-003', factura, 'pr-sib-003')
+        mock_delete.return_value = self._nave_respuesta(200)
+
+        self.env['payment.transaction']._nave_cancel_pending_requests(
+            factura, self.env['sale.order'], exclude=propio,
+        )
+
+        self.assertEqual(hermano.state, 'cancel')
+        self.assertEqual(otro_documento.state, 'pending', "No toca cobros de otros documentos")
+        self.assertEqual(propio.state, 'pending', "No se da de baja a sí mismo")
+        url = mock_delete.call_args[0][0]
+        self.assertTrue(url.endswith('/api/payment_requests/pr-sib-001'))
+        self.assertEqual(mock_delete.call_args[1]['json'],
+                         {'reason': {'code': 'disabled_from_saas', 'description': 'disabled from SAAS'}})
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.delete')
+    def test_69_un_hermano_ya_dado_de_baja_se_cancela_sin_error(self, mock_delete):
+        self._nave_arm_token()
+        factura = self._nave_factura()
+        hermano = self._nave_cobro_pendiente('TEST-NAVE-SIB-004', factura, 'pr-sib-004')
+        mock_delete.return_value = self._nave_respuesta(400, {'code': 'payment_request_is_disabled'})
+
+        with self.assertNoLogs('odoo.addons.payment_nave.models.payment_transaction', 'ERROR'):
+            self.env['payment.transaction']._nave_cancel_pending_requests(factura, self.env['sale.order'])
+
+        self.assertEqual(hermano.state, 'cancel')
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.delete')
+    def test_70_si_nave_no_confirma_la_baja_el_hermano_queda_como_estaba(self, mock_delete):
+        self._nave_arm_token()
+        factura = self._nave_factura()
+        hermano = self._nave_cobro_pendiente('TEST-NAVE-SIB-005', factura, 'pr-sib-005')
+        mock_delete.return_value = self._nave_respuesta(400, {'code': 'payment_request_delete_failed'})
+
+        with self.assertLogs('odoo.addons.payment_nave.models.payment_transaction', 'ERROR') as logs:
+            self.env['payment.transaction']._nave_cancel_pending_requests(factura, self.env['sale.order'])
+
+        self.assertEqual(hermano.state, 'pending')
+        self.assertIn('TEST-NAVE-SIB-005', '\n'.join(logs.output))
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.delete')
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_71_aprobar_un_cobro_da_de_baja_los_demas(self, mock_get, mock_delete):
+        """B6c: la factura se paga con un link y el otro, todavía pendiente, deja de ser cobrable."""
+        self._nave_arm_token()
+        factura = self._nave_factura()
+        viejo = self._nave_cobro_pendiente('TEST-NAVE-SIB-006', factura, 'pr-sib-006')
+        nuevo = self._nave_cobro_pendiente('TEST-NAVE-SIB-007', factura, 'pr-sib-007')
+        mock_get.return_value = self._nave_verificacion('APPROVED', payment_id='pay-sib-007',
+                                                        reference='TEST-NAVE-SIB-007')
+        mock_delete.return_value = self._nave_respuesta(200)
+
+        with patch.object(type(self.env['ir.cron']), '_trigger') as mock_trigger:
+            nuevo._process_notification_data({'payment_id': 'pay-sib-007', 'external_payment_id': 'TEST-NAVE-SIB-007'})
+
+        self.assertEqual(nuevo.state, 'done')
+        self.assertEqual(viejo.state, 'cancel')
+        self.assertTrue(mock_trigger.called, "Al aprobar se adelanta el post-proceso")
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.delete')
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_72_una_segunda_aprobacion_avisa_cobro_duplicado(self, mock_get, mock_delete):
+        self._nave_arm_token()
+        factura = self._nave_factura()
+        primero = self._nave_cobro_pendiente('TEST-NAVE-SIB-008', factura, 'pr-sib-008')
+        primero._set_done()
+        segundo = self._nave_cobro_pendiente('TEST-NAVE-SIB-009', factura, 'pr-sib-009')
+        mock_get.return_value = self._nave_verificacion('APPROVED', payment_id='pay-sib-009',
+                                                        reference='TEST-NAVE-SIB-009')
+
+        with self.assertLogs('odoo.addons.payment_nave.models.payment_transaction', 'WARNING') as logs:
+            segundo._process_notification_data({'payment_id': 'pay-sib-009', 'external_payment_id': 'TEST-NAVE-SIB-009'})
+
+        self.assertIn('Cobro duplicado', '\n'.join(logs.output))
+        self.assertIn('TEST-NAVE-SIB-008', '\n'.join(logs.output))
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_73_un_rechazo_no_adelanta_el_post_proceso(self, mock_get):
+        self._nave_arm_token()
+        tx = self._nave_cobro_pendiente('TEST-NAVE-SIB-010', self._nave_factura(), 'pr-sib-010')
+        mock_get.return_value = self._nave_verificacion('REJECTED', 'denied', 'pay-sib-010',
+                                                        reference='TEST-NAVE-SIB-010')
+
+        with patch.object(type(self.env['ir.cron']), '_trigger') as mock_trigger:
+            tx._process_notification_data({'payment_id': 'pay-sib-010', 'external_payment_id': 'TEST-NAVE-SIB-010'})
+
+        self.assertFalse(mock_trigger.called)
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.delete')
+    @patch('odoo.addons.payment_nave.models.nave_link_wizard.requests.post')
+    def test_74_un_link_nuevo_da_de_baja_el_anterior(self, mock_post, mock_delete):
+        """Generar dos links para la misma factura deja cobrable sólo el último."""
+        self._nave_arm_token()
+        factura = self._nave_factura(250.0)
+        respuestas = iter(['pr-link-a', 'pr-link-b'])
+
+        def _intencion(url, **kwargs):
+            iid = next(respuestas)
+            return MagicMock(json=MagicMock(return_value={'id': iid, 'checkout_url': f'https://checkout.ranty.io/{iid}'}),
+                             raise_for_status=MagicMock(return_value=None))
+        mock_post.side_effect = _intencion
+        mock_delete.return_value = self._nave_respuesta(200)
+
+        def _generar():
+            wizard = self.env['nave.payment.link.wizard'].create({
+                'provider_id': self.nave_provider.id, 'company_id': self.env.company.id,
+                'partner_id': self.partner.id, 'amount': 250.0, 'currency_id': self.currency_ars.id,
+                'external_reference': 'INV-SIB-074', 'move_id': factura.id,
+            })
+            wizard.action_generate_link()
+            return self.env['payment.transaction'].search([('nave_payment_request_id', '=', wizard.nave_payment_request_id)])
+
+        link_a = _generar()
+        link_b = _generar()
+
+        self.assertEqual(link_a.state, 'cancel')
+        self.assertEqual(link_b.state, 'pending')
+        self.assertTrue(mock_delete.call_args[0][0].endswith('/api/payment_requests/pr-link-a'))
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_75_la_conciliacion_cancela_una_intencion_dada_de_baja(self, mock_get):
+        """Nave responde 400 payment_request_is_disabled: la transacción se cancela, sin error."""
+        self._nave_arm_token()
+        tx = self._nave_make_stale_tx('TEST-NAVE-CRON-010', 'pr-cron-010')
+        mock_get.return_value = self._nave_respuesta(400, {'code': 'payment_request_is_disabled',
+                                                           'message': 'Payment request is disabled'})
+
+        with self.assertNoLogs('odoo.addons.payment_nave.models.payment_transaction', 'ERROR'):
+            self.env['payment.transaction']._cron_nave_poll_pending_transactions()
+
+        self.assertEqual(tx.state, 'cancel')
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_76_otro_400_de_la_intencion_sigue_siendo_un_error(self, mock_get):
+        self._nave_arm_token()
+        tx = self._nave_make_stale_tx('TEST-NAVE-CRON-011', 'pr-cron-011')
+        mock_get.return_value = self._nave_respuesta(400, {'code': 'otra_cosa'})
+
+        with self.assertRaises(requests.exceptions.HTTPError):
+            tx._nave_poll_payment_request()
+
+        self.assertEqual(tx.state, 'pending')
+
+    def _nave_wizard(self, **vals):
+        return self.env['nave.payment.link.wizard'].create({
+            'provider_id': self.nave_provider.id, 'company_id': self.env.company.id,
+            'partner_id': self.partner.id, 'amount': 50.0, 'currency_id': self.currency_ars.id,
+            'external_reference': 'INV-VAL-077', **vals,
+        })
+
+    def test_77_la_validez_del_link_esta_acotada(self):
+        """B5c: Nave tomó 0 horas como 7 días. Fuera de 1 a 168 no se genera el link."""
+        for horas in (0, -1, 169):
+            with self.subTest(horas=horas), self.assertRaises(ValidationError):
+                self._nave_wizard(duration_hours=horas)
+        for horas in (1, 168):
+            with self.subTest(horas=horas):
+                self.assertEqual(self._nave_wizard(duration_hours=horas).duration_hours, horas)
+        self.assertFalse(self.env['payment.transaction'].search([('reference', 'like', 'INV-VAL-077')]),
+                         "Una validez inválida no deja cobros huérfanos")
+
+    @patch('odoo.addons.payment_nave.models.nave_link_wizard.requests.post')
+    def test_78_el_chatter_muestra_un_link_y_escapa_los_valores(self, mock_post):
+        self._nave_arm_token()
+        factura = self._nave_factura(50.0)
+        mock_post.return_value = MagicMock(
+            json=MagicMock(return_value={'id': 'pr-078', 'checkout_url': 'https://checkout.ranty.io/x?a=1&b=<2>'}),
+            raise_for_status=MagicMock(return_value=None),
+        )
+
+        self._nave_wizard(move_id=factura.id, external_reference='INV-<078>').action_generate_link()
+
+        cuerpo = str(factura.message_ids[0].body)
+        self.assertIn("<a href=", cuerpo, "El link es un link, no texto")
+        self.assertNotIn("&lt;b&gt;", cuerpo, "El HTML del mensaje no se escapa")
+        self.assertIn("&lt;2&gt;", cuerpo, "Los valores sí se escapan")
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_79_eligio_tarjeta_y_pago_con_billetera(self, mock_get):
+        """§3.47: el cliente eligió Tarjeta en el sitio y pagó con QR. La transacción lo refleja."""
+        tx = self._nave_make_tx('TEST-NAVE-MEDIO-001')
+        tx.payment_method_id = self.env.ref('payment.payment_method_card')
+
+        self._nave_arm_token()
+        mock_get.return_value = MagicMock(
+            json=MagicMock(return_value={**self.PAGO_BILLETERA, 'external_payment_id': 'TEST-NAVE-MEDIO-001'}),
+            raise_for_status=MagicMock(return_value=None),
+        )
+        tx._process_notification_data({'payment_id': 'pay-qr', 'external_payment_id': 'TEST-NAVE-MEDIO-001'})
+
+        self.assertEqual(tx.payment_method_id, self.nave_qr_method)
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_80_sin_datos_del_instrumento_el_medio_no_cambia(self, mock_get):
+        tx = self._nave_make_tx('TEST-NAVE-MEDIO-002')
+        antes = tx.payment_method_id
+        self._nave_arm_token()
+        mock_get.return_value = self._nave_verificacion('APPROVED', payment_id='pay-m2', reference='TEST-NAVE-MEDIO-002')
+
+        tx._process_notification_data({'payment_id': 'pay-m2', 'external_payment_id': 'TEST-NAVE-MEDIO-002'})
+
+        self.assertEqual(tx.payment_method_id, antes)
+
+    @patch('odoo.addons.payment_nave.models.payment_transaction.requests.get')
+    def test_81_la_referencia_del_proveedor_es_el_codigo_de_operacion(self, mock_get):
+        """§3.46: provider_reference quedaba vacío; ahora lleva el código que muestra el panel de Nave."""
+        tx = self._nave_cobrar('TEST-NAVE-REF-001', self.PAGO_CUOTAS, mock_get)
+
+        self.assertEqual(tx.provider_reference, 'AYO870166980')

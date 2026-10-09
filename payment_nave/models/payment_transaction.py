@@ -14,6 +14,10 @@ from .payment_provider import NAVE_TRUSTED_DOMAIN
 
 _logger = logging.getLogger(__name__)
 
+# Motivo con que se da de baja una intención. Nave exige este par exacto: rechaza con "Invalid input
+# reason" cualquier otra descripción para el código (plan de homologación §3.36).
+NAVE_CANCEL_REASON = {'code': 'disabled_from_saas', 'description': 'disabled from SAAS'}
+
 
 class PaymentTransaction(models.Model):
     _inherit = 'payment.transaction'
@@ -307,7 +311,15 @@ class PaymentTransaction(models.Model):
         }
 
         response = requests.get(api_url, headers=headers, timeout=10)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            # Nave no informa la baja como un estado: responde 400 payment_request_is_disabled. Tomarlo
+            # como falla dejaba la transacción pendiente para siempre y un error en cada corrida.
+            if not self._nave_is_disabled_error(e):
+                raise
+            self._set_canceled(_("Nave informó la intención de pago como dada de baja."))
+            return
         data = response.json()
 
         status_name = (data.get('status') or {}).get('name')
@@ -327,6 +339,105 @@ class PaymentTransaction(models.Model):
             })
         elif status_name in ('EXPIRED', 'DISABLED', 'BLOCKED'):
             self._set_canceled(_("Nave informó la intención de pago como %s.", status_name))
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Un solo cobro pendiente por documento
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _nave_after_approval(self):
+        """ Lo que sigue a un cobro aprobado: los demás cobros del documento y el post-proceso.
+
+        Un link queda en manos del cliente (un correo, una pestaña abierta). Si los otros cobros
+        pendientes del mismo documento siguieran vivos en Nave, el cliente podría pagar dos veces:
+        en B6c quedaron dos links cobrables de una factura ya pagada (plan de homologación §3.50).
+        """
+        self.ensure_one()
+        cobrados = self.search([
+            ('provider_code', '=', 'nave'), ('state', '=', 'done'), ('id', '!=', self.id),
+            '|', ('invoice_ids', 'in', self.invoice_ids.ids),
+            ('sale_order_ids', 'in', self.sale_order_ids.ids),
+        ]) if (self.invoice_ids or self.sale_order_ids) else self.browse()
+        if cobrados:
+            _logger.warning(
+                "[payment_nave] Cobro duplicado: %s se aprobó y el documento ya tenía cobrado %s. "
+                "Revisar y devolver el sobrante desde el panel de Nave.",
+                self.reference, ', '.join(cobrados.mapped('reference')),
+            )
+        self._nave_cancel_pending_requests(self.invoice_ids, self.sale_order_ids, exclude=self)
+        self._nave_trigger_post_process()
+
+    @api.model
+    def _nave_cancel_pending_requests(self, invoices, orders, exclude=None):
+        """ Da de baja en Nave los cobros pendientes de esos documentos y los cancela en Odoo.
+
+        Nunca interrumpe a quien la llama: si Nave no confirma una baja, el cobro queda como estaba
+        y el error a la vista, y lo retoma la conciliación periódica.
+        """
+        if not invoices and not orders:
+            return
+        pendientes = self.search([
+            ('provider_code', '=', 'nave'), ('state', 'in', ('draft', 'pending')),
+            ('nave_payment_request_id', '!=', False),
+            ('id', 'not in', (exclude or self.browse()).ids),
+            '|', ('invoice_ids', 'in', invoices.ids), ('sale_order_ids', 'in', orders.ids),
+        ])
+        for tx in pendientes:
+            tx._nave_cancel_request()
+
+    def _nave_cancel_request(self):
+        """ Da de baja la intención de este cobro en Nave y, si Nave la confirma, lo cancela. """
+        self.ensure_one()
+        provider = self.provider_id
+        url = f"{provider._nave_get_api_url()}/api/payment_requests/{self.nave_payment_request_id}"
+        headers = {
+            'Authorization': f"Bearer {provider._nave_get_access_token()}",
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+        }
+        try:
+            response = requests.delete(url, json={'reason': dict(NAVE_CANCEL_REASON)}, headers=headers,
+                                       timeout=10)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            if not self._nave_is_disabled_error(e):
+                respuesta = getattr(e, 'response', None)
+                _logger.error(
+                    "[payment_nave] Nave no dio de baja el cobro pendiente %s (intención %s, HTTP %s). "
+                    "Queda como estaba. Respuesta: %s", self.reference, self.nave_payment_request_id,
+                    getattr(respuesta, 'status_code', '-'),
+                    ((respuesta.text if respuesta is not None else '') or str(e))[:500],
+                )
+                return
+        self._set_canceled(state_message=_(
+            "Dado de baja en Nave: el documento tiene otro cobro, así que este link ya no se puede pagar."
+        ))
+
+    @staticmethod
+    def _nave_is_disabled_error(exc):
+        """ True si la respuesta de Nave dice que la intención ya está dada de baja.
+
+        Nave no informa la baja como un estado: consultar o dar de baja una intención dada de baja
+        responde `400 {"code": "payment_request_is_disabled"}`.
+        """
+        response = getattr(exc, 'response', None)
+        if response is None or response.status_code != 400:
+            return False
+        try:
+            payload = response.json()
+        except ValueError:
+            return False
+        return isinstance(payload, dict) and payload.get('code') == 'payment_request_is_disabled'
+
+    def _nave_trigger_post_process(self):
+        """ Adelanta el post-proceso: el registro contable no espera la próxima corrida.
+
+        Un link se paga fuera del sitio, sin página de retorno, y la factura seguía impaga hasta 10
+        minutos (B1c). La contabilidad no se hace dentro del aviso: un error contable lo haría fallar,
+        el savepoint descartaría la aprobación y Nave reintentaría un cobro ya cobrado.
+        """
+        cron = self.env.ref('payment.cron_post_process_payment_tx', raise_if_not_found=False)
+        if cron:
+            cron.sudo()._trigger()
 
     def _nave_extract_payment_id(self, intent_data):
         """ Devuelve el `payment_id` del último intento de pago de una intención, o False. """
@@ -370,8 +481,30 @@ class PaymentTransaction(models.Model):
             'nave_total_financial_cost': plan.get('total_financial_cost') or False,
             'nave_customer_total': float(((plan.get('total_amount') or {}).get('value')) or 0.0),
         }
+        # El código de operación es lo que muestra el panel de Nave y su resumen de liquidaciones: va
+        # a `provider_reference`, el campo estándar de Odoo para cruzar el cobro con el proveedor.
+        if payment_data.get('payment_code'):
+            valores['provider_reference'] = payment_data['payment_code']
         self.write(valores)
-        self._nave_apply_card_brand(metodo.get('card_brand'))
+        self._nave_apply_payment_method(payment_data)
+
+    def _nave_apply_payment_method(self, payment_data):
+        """ Refleja en el medio de pago de la transacción cómo se pagó de verdad.
+
+        En la página de Nave el cliente puede usar un medio distinto del que eligió en el sitio: en
+        producción, eligiendo *Tarjeta* se pagó con QR y billetera, y la transacción quedaba como
+        Tarjeta (§3.47). Con tarjeta, la marca; con billetera o transferencia, el QR interoperable.
+        """
+        self.ensure_one()
+        metodo = payment_data.get('payment_method') or {}
+        if metodo.get('card_brand'):
+            self._nave_apply_card_brand(metodo['card_brand'])
+        elif metodo.get('type') == 'transfer_payment' or payment_data.get('payment_input') == 'wallet':
+            qr = self.provider_id.with_context(active_test=False).payment_method_ids.filtered(
+                lambda m: m.code == 'nave_qr'
+            )[:1]
+            if qr:
+                self.payment_method_id = qr
 
     def _nave_apply_card_brand(self, card_brand):
         """ Refleja la marca en el medio de pago de la transacción.
@@ -639,6 +772,8 @@ class PaymentTransaction(models.Model):
                 # se descarta y queda un cobro real sin registrar.
                 msg = _("Tras un intento rechazado previamente — %s", msg)
             self._set_done(state_message=msg, extra_allowed_states=('cancel',))
+            if self.state == 'done':
+                self._nave_after_approval()
         elif status_name in ['REJECTED', 'CANCELLED']:
             msg = f"Transacción rechazada/cancelada en Nave. Motivo: {reason_code}"
             self._set_canceled(state_message=msg)
