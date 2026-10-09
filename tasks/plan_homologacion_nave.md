@@ -458,6 +458,35 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.42 Cierre de caja y asientos del POS (2026-10-09)
+
+Cierre de la sesión `POS/00001`, abierta desde el 2026-10-06: 16 órdenes por $5.154,34, todas
+facturadas. La ventana de cierre mostró Nave Point $1.623,44 y Nave QR $147,00, los dos sin
+diferencia, y el efectivo se contó en lo esperado.
+
+| Qué se revisó | Resultado |
+|---|---|
+| Asiento de la sesión `POSS/2026/10/0017` | ✅ Publicado y cuadrado. Mueve *Créditos por ventas (PoS)* por método: $1.623,44, $147,00 y $3.383,90, todo conciliado |
+| Cobros de Nave (C15) | ✅ Un `account.payment` por método en el diario **Banco**: `PBNK1/2026/00012` (Nave Point, $1.623,44) y `PBNK1/2026/00013` (Nave QR, $147). Debitan *1.1.1.02.003 Recibos pendientes* y quedan *en proceso* hasta conciliarlos con el extracto. Es el circuito estándar de Odoo |
+| Facturas (F2) | ✅ Las 16 quedan pagadas, incluidas las 8 cobradas con Nave |
+| Efectivo | El extracto del diario Efectivo registra $3.383,90 |
+
+**Lo que falta para conciliar con el banco (F4):**
+
+- **Nave acredita el neto.** Por los $147 del QR llegaron $145,57, y por los $150 del QR de la
+  terminal, $148,55: alrededor de 0,97 % de comisión. En Odoo el cobro queda por el bruto, así que al
+  conciliar el extracto queda una diferencia por cada acreditación, y la comisión no está asentada en
+  ninguna parte.
+- **Un pago por método y por sesión.** Si Nave acredita cada cobro por separado, como en los dos
+  pagos con QR, un solo pago de $1.623,44 se concilia contra varias líneas del extracto. Con
+  *Identificar cliente* (`split_transactions`) en los métodos de Nave, Odoo crea un pago por cobro, y
+  cada uno se concilia con su acreditación.
+
+Las dos cosas se resuelven en la configuración contable, no en el módulo: un modelo de conciliación
+que lleve la diferencia a una cuenta de comisiones, y *Identificar cliente* en los métodos de Nave.
+Queda para decidir con la homologación. Primero conviene ver en el panel de Nave cómo y cuándo
+liquida los cobros con tarjeta (consulta 7 de la reunión).
+
 ### 3.41 Nave Point con *Código QR* en la terminal (2026-10-08)
 
 Cobro real de $150 con *Nave Point* en Odoo, eligiendo *Código QR* en la terminal y pagando con la
@@ -2072,7 +2101,7 @@ deciden cómo se escribe el fix de B11.
 | C12 | Datos en el ticket | Cobro aprobado → imprimir | **Hoy no se llama a `set_receipt_info()`**: el ticket no imprime marca, últimos 4 ni cupón, aunque la API los devuelve (`doc_point.md:104-138`). Confirmar si Nave lo exige |✅ 2026-10-06: el ticket sí se completa. Lleva marca, últimos cuatro, tipo, cupón, autorización, lote y emisor. §3.27 |
 | C13 | Devolución desde POS | Orden de devolución → Tarjeta | 🚫 Falla por B2/B3 (`REFUND-CIEGO`) | ⬜ |
 | C14 | Webhook de baja de intención | Provocar un `DISABLED` | Es un **segundo contrato de webhook** con payload distinto (`payment_request_id`, `disabled_reason`, `doc_point.md` §8) que el módulo **no maneja** | ⬜ |
-| C15 | Cierre de caja | Cerrar la sesión POS con cobros Nave | Los pagos quedan en el diario del método. No hay conciliación contra Nave | ⬜ |
+| C15 | Cierre de caja | Cerrar la sesión POS con cobros Nave | Los pagos quedan en el diario del método. No hay conciliación contra Nave | ✅ 2026-10-09: sesión `POS/00001` cerrada sin diferencias. Los cobros de Nave quedan en el diario Banco, en *Recibos pendientes*, a la espera del extracto. §3.42 |
 | C16 | Cambio de `pos_id` con sesión abierta | Intentar editar el método de pago con una sesión POS abierta | Odoo lo rechaza. **Consecuencia operativa**: no se puede reemplazar una terminal a mitad de turno; hay que cerrar caja primero | ✅ verificado 2026-09-22 |
 
 ### Bloque H — QR interoperable presencial
@@ -2127,9 +2156,9 @@ deciden cómo se escribe el fix de B11.
 | ID | Caso | Pasos | Resultado esperado | Estado |
 |---|---|---|---|---|
 | F1 | Asiento del cobro online | A2 completo | Asiento en el diario del provider, factura conciliada | ⬜ |
-| F2 | Asiento del cobro POS | C2 + cierre de sesión | Asiento correcto en el diario del método de pago | ⬜ |
+| F2 | Asiento del cobro POS | C2 + cierre de sesión | Asiento correcto en el diario del método de pago | ✅ 2026-10-09: asiento de sesión `POSS/2026/10/0017` cuadrado y un pago por método (`PBNK1/2026/00012` Nave Point $1.623,44, `PBNK1/2026/00013` Nave QR $147). Las 16 facturas quedan pagadas. §3.42 |
 | F3 | Trazabilidad | Cualquier cobro | `nave_payment_id` visible en la transacción. Nota: **`provider_reference` queda vacío** — Odoo lo usa para trazabilidad estándar | ⬜ |
-| F4 | Total vs monto cobrado | Pedido con lista de precios Nave | Total del pedido == `amount.value` == monto en el panel de Nave | ⬜ |
+| F4 | Total vs monto cobrado | Pedido con lista de precios Nave | Total del pedido == `amount.value` == monto en el panel de Nave | ✅ en lo que pedía: el total del pedido, el `amount.value` y lo que cobró Nave coinciden. ⚠️ Nave acredita el **neto**, y la comisión no queda en ningún asiento. §3.42 |
 
 ### Bloque G — Multi-compañía
 
@@ -2174,7 +2203,7 @@ Lo primero que se presenta a Nave. Lo que queda afuera no se descarta: se homolo
 | Webhook de los pagos del POS | — | ✅ 2026-10-08: responde 200 y Nave no reintenta (§3.39) |
 | Seguridad del webhook | E1c a E3c | ⬜ La restricción de host de `payment_check_url` está en el código; falta la prueba |
 | Robustez del webhook | D2c a D6c | D2c a D4c ✅; D5c y D6c ⬜ |
-| Contabilidad y cierre de caja | F1 a F4, C15 | ⬜ |
+| Contabilidad y cierre de caja | F1 a F4, C15 | ✅ C15, F2 y F4 (§3.42). ⚠️ La comisión que Nave descuenta del neto no queda asentada. F1 y F3 ⬜ |
 | Calidad | E0.1 a E0.4, E4c | ✅ en cada commit |
 
 | Queda para después | Por qué |
