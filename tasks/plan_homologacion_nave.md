@@ -505,6 +505,23 @@ Con los dos QR del 2026-10-08 (§3.40 y §3.41), la comisión fue de ~0,97 %.
 - **El ID externo de pago une el resumen con Odoo.** Es la referencia de cada línea de pago del POS
   y de cada transacción online.
 
+**La sesión `POS/00001` contra el resumen** (descargado otra vez el 2026-10-09, del 09/09 al
+09/10):
+
+| Pago en Odoo | Cobros en Nave | Bruto | Comisión | IVA comisión | Neto acreditado |
+|---|---|---|---|---|---|
+| `PBNK1/2026/00012` Nave Point | 7, todos con ID externo de Odoo | $1.623,44 | $71,93 | $15,10 | $1.536,41 |
+| `PBNK1/2026/00013` Nave QR | 1 (`SMI542294163`) | $147,00 | $1,18 | $0,25 | $145,57 |
+
+- **El bruto coincide al centavo** con los dos pagos de la sesión, y cada cobro de Odoo aparece con su
+  `uuid` como ID externo. Los dos pagos sueltos de Belo (`HNP400101313`, `BXL589327838`) figuran
+  con ID externo *"-"*: Nave sabe que no salieron de ninguna integración.
+- **Tarifas observadas:** tarjeta (Mastercard prepaga, Amex crédito) **4,8 %**, y QR o dinero en
+  cuenta **0,8 %**, las dos más el 21 % de IVA sobre la comisión. Un cobro de $15 con dinero en cuenta
+  del 05/10 no tuvo comisión. Las cuentas cierran al centavo: bruto − comisión − IVA = neto.
+- Para conciliar esta sesión a mano hay que registrar $73,11 de comisiones y $15,35 de IVA crédito
+  fiscal, y repartir los dos pagos de Odoo entre las ocho acreditaciones del extracto.
+
 **Identificar cliente con Consumidor Final:** el core sólo exige que la orden tenga cliente
 (`_askForCustomerIfRequired`), y el POS ya pone *Consumidor Final Anónimo* por defecto, así que el
 cajero no ve ninguna diferencia. Lo que cambia es la contabilidad: un `account.payment` por cobro en
