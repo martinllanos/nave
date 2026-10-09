@@ -458,6 +458,36 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.44 E1c: el SSRF está cerrado, pero el pago verificado no se ata a la transacción (2026-10-09)
+
+**E1c, en producción.** Se mandó al webhook un aviso falso con la referencia `A5-S00041` (pedido de
+$50, transacción **cancelada**), un `payment_id` inventado y un `payment_check_url` que apuntaba a
+una ruta trampa de `www.onlyone.ar`. Se eligió una transacción cancelada a propósito: una aprobación
+puede pasarla a pagada, porque el módulo contempla el reintento del cliente (A16).
+
+- ✅ Odoo ignoró la URL: *"payment_check_url fuera de ranty.io … Se ignora y se verifica contra la URL
+  propia"*.
+- ✅ Verificó contra `api.ranty.io`, que respondió 404 por el pago inventado. El webhook respondió 500
+  y la transacción siguió cancelada.
+- ✅ La ruta trampa no recibió ninguna visita.
+
+**🔴 Hallazgo: el pago verificado no se compara con la transacción.** `_process_notification_data`
+consulta a Nave el `payment_id` del aviso y, si está aprobado, da por pagada la transacción de la
+referencia del aviso. No comprueba que ese pago sea de esa transacción. Reproducido en local, sin
+tocar producción y con rollback: un aviso con la referencia de una transacción de $50 cancelada y el
+`payment_id` de un pago aprobado de $150 de otra venta dejó la de $50 **pagada**, asociada al pago
+ajeno.
+
+Para explotarlo hace falta un `payment_id` aprobado del comercio, un UUID difícil de adivinar pero que
+no es secreto. Nave ya devuelve lo necesario para cerrarlo: el pago trae su `external_payment_id`,
+que es la referencia que mandó Odoo, y su `payment_request_id`. Verificado en producción, en sólo
+lectura.
+
+**Arreglo propuesto:** si el pago verificado no corresponde a la transacción, se ignora, se registra
+como aviso sospechoso y se acusa con 200. Los pagos de una misma intención comparten la referencia,
+así que el reintento después de un rechazo sigue funcionando. Esto deja resuelto también E2c: un aviso
+sin autenticación sólo se aplica si Nave confirma el pago y el pago es de esa transacción.
+
 ### 3.43 H8: errores al crear el cobro con QR (2026-10-09)
 
 **Lo que documenta Nave hoy** (página del QR interoperable, *Códigos de errores*; leída del
@@ -2252,7 +2282,7 @@ deciden cómo se escribe el fix de B11.
 
 | ID | Caso | Pasos | Resultado esperado | Estado |
 |---|---|---|---|---|
-| E1c | SSRF vía `payment_check_url` 🔴 | POST al webhook con una `reference` válida y `payment_check_url` apuntando a un host propio que responda `APPROVED` | **Debe rechazarse.** Hoy se marca la factura como pagada (B5) | ⬜ |
+| E1c | SSRF vía `payment_check_url` 🔴 | POST al webhook con una `reference` válida y `payment_check_url` apuntando a un host propio que responda `APPROVED` | **Debe rechazarse.** Hoy se marca la factura como pagada (B5) | ✅ 2026-10-09, producción: la URL ajena se ignora y no se visita; la transacción no cambia. 🔴 Hallazgo nuevo: el pago verificado no se ata a la transacción. §3.44 |
 | E2c | Webhook sin autenticación | POST anónimo con datos plausibles | Mitigado sólo por el GET de verificación. Documentar la postura ante Nave | ⬜ |
 | E3c | Secret expuesto | Usuario sin `base.group_system` abre el provider | `nave_client_secret` oculto; **`nave_client_id` no tiene `groups`** y sí se ve (`payment_provider.py:21-25`) | ⬜ |
 | E4c | Bandit sobre los tres módulos | E0.4 | 0 hallazgos ≥ medio | ✅ **0 issues** (2026-09-21). ⚠️ Bandit **no detecta el SSRF de B5**: pasar este chequeo no sustituye a E1c | ⬜ |
