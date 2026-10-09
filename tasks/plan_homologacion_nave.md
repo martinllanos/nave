@@ -468,6 +468,7 @@ app de Galicia (MODO). Evidencia en `docs/homologacion/evidencias/C2_qr_terminal
 | Envío | ✅ *"Enviando el cobro a la terminal 5d0ab925…"* a las 20:42:58 UTC. Odoo, *"Esperando la tarjeta"* |
 | Pago | ✅ La terminal mostró su QR con el monto. Nave aprobó a las 20:45:49, el webhook respondió 200 sin reintentos y el POS lo registró en esa misma consulta: *Pago exitoso* |
 | Cupón de la terminal | ✅ *"Código QR - Dinero en cuenta"*, código de operación `ONQ625134352`. Sin la mezcla de crédito y débito de los cupones con tarjeta |
+| Ticket del POS | ✅ *"Billetera: banco galicia - modo"*, cupón `ONQ625134352` y autorización (`7_ticket_pos.png`) |
 
 **Lo que informa Nave del pago:** `payment_input: wallet`, `payment_method.type: transfer_payment`
 y `wallet.name: "banco galicia - modo"`, con `wallet.coelsa_id: "88"` y el CUIT de la entidad. Para
