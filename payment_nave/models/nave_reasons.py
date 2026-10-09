@@ -108,3 +108,57 @@ def nave_reason_message(env, code):
     """
     message = NAVE_REASON_MESSAGES.get((code or '').strip())
     return env._(message) if message else ''
+
+
+# Errores al CREAR una intención de cobro: Nave no acepta el cobro y no hay pago ni intención. No los
+# publica con un mensaje para el cajero, como los motivos de arriba; los mensajes de acá dicen qué
+# pasó y qué hacer, según quién lo puede resolver. Documentados en la página del QR interoperable
+# (siete códigos) y en la de Nave Point (tres, con otra forma); leídos el 2026-10-09.
+NAVE_INTENT_ERROR_MESSAGES = {
+    'invalid_pos': _lt(
+        "El ID del punto de venta de este método de pago pertenece a otro medio de cobro de Nave. "
+        "Avisá al administrador para que lo corrija en el método de pago."
+    ),
+    'error_encode_dynamic_qr': _lt("Nave no pudo generar el QR. Reintentá en unos segundos."),
+    'no_gateways_available': _lt(
+        "Nave no tiene disponible ningún procesador para este medio de cobro. Cobrá por otro medio "
+        "y, si se repite, avisá al administrador."
+    ),
+    'payment_type_is_not_operative': _lt(
+        "Este medio de cobro de Nave está fuera de servicio en este momento. Cobrá por otro medio."
+    ),
+    'application_error_service': _lt(
+        "Nave no reconoce las credenciales del comercio. Avisá al administrador."
+    ),
+    'client_validation_failed': _lt(
+        "Nave rechazó los datos del cobro. Avisá al administrador: el detalle quedó en el registro."
+    ),
+    'internal_server_error': _lt(
+        "Nave tuvo un error interno. Reintentá en unos segundos o cobrá por otro medio."
+    ),
+}
+
+# Otros nombres con que Nave documenta el mismo error. `interval_server_error` es una errata de la
+# tabla del QR; `api_status_error` es como lo nombra la página de Nave Point.
+NAVE_INTENT_ERROR_ALIASES = {
+    'api_status_error': 'payment_type_is_not_operative',
+    'interval_server_error': 'internal_server_error',
+}
+
+
+def nave_intent_error(payload):
+    """ Clave del catálogo para el cuerpo de un error al crear una intención, o '' si no la hay.
+
+    Nave usa dos formas: la real y la de Nave Point traen el código en `code`, en minúsculas
+    (`{"code": "invalid_pos", "message": "Given POS…"}`); los ejemplos del QR traen el HTTP en
+    `code` y el código en `message`, en mayúsculas (`{"code": "409", "message": "INVALID_POS"}`).
+    No se busca el código en todo el cuerpo: un texto de `detail` podría coincidir con otra clave.
+    """
+    if not isinstance(payload, dict):
+        return ''
+    code = str(payload.get('code') or '').strip()
+    if not code or code.isdigit():
+        code = str(payload.get('message') or '').strip()
+    key = code.lower()
+    key = NAVE_INTENT_ERROR_ALIASES.get(key, key)
+    return key if key in NAVE_INTENT_ERROR_MESSAGES else ''

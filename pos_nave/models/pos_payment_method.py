@@ -5,7 +5,11 @@ import requests
 from odoo import api, fields, models, _
 from odoo.exceptions import UserError, AccessError
 
-from odoo.addons.payment_nave.models.nave_reasons import nave_reason_message
+from odoo.addons.payment_nave.models.nave_reasons import (
+    NAVE_INTENT_ERROR_MESSAGES,
+    nave_intent_error,
+    nave_reason_message,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -219,8 +223,13 @@ class PosPaymentMethod(models.Model):
             data['nave_duration_seconds'] = NAVE_INTENT_DURATION_SECONDS
             return data
         except requests.exceptions.RequestException as e:
-            _logger.error("[pos_nave] Error enviando pago a la terminal Nave: %s", e)
-            return {'error': True, 'message': self._nave_error_message(e)}
+            response = getattr(e, 'response', None)
+            _logger.error(
+                "[pos_nave] Nave no aceptó el cobro %s %s (HTTP %s). Respuesta: %s",
+                destino, pos_id, getattr(response, 'status_code', '-'), self._nave_error_body(e) or e,
+            )
+            provider._nave_log_invalid_pos(e, payment_type, pos_id)
+            return {'error': True, 'message': self._nave_intent_error_message(e)}
 
     @api.model
     def nave_check_payment_status(self, payment_method_id, intent_id):
@@ -460,6 +469,31 @@ class PosPaymentMethod(models.Model):
             data.get('nave_payment_id') or '-', reason.get('code') or '-',
             reason.get('message') or 'sin mensaje publicado',
         )
+
+    def _nave_intent_error_message(self, exc):
+        """ Aviso al cajero cuando Nave no acepta crear un cobro.
+
+        Para los errores del catálogo (`NAVE_INTENT_ERROR_MESSAGES`), el aviso dice qué pasó y qué
+        hacer, y deja el código de Nave y el HTTP para soporte. Para cualquier otro, queda como
+        siempre: lo que informe Nave, o la pista por código HTTP si Nave no explica nada.
+        """
+        payload = self._nave_error_payload(exc)
+        key = nave_intent_error(payload)
+        if not key:
+            return self._nave_error_message(exc)
+        code = str(payload.get('code') or '').strip()
+        if not code or code.isdigit():
+            code = str(payload.get('message') or '').strip()
+        response = getattr(exc, 'response', None)
+        lines = [
+            self.env._(NAVE_INTENT_ERROR_MESSAGES[key]),
+            "",
+            _("Para soporte:"),
+            _("Código: %s", code),
+        ]
+        if response is not None:
+            lines.append(_("HTTP: %s", response.status_code))
+        return "\n".join(lines)
 
     def _nave_error_message(self, exc):
         """ Extrae un mensaje legible de una excepción de `requests` contra la API de Nave. """

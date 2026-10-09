@@ -816,3 +816,52 @@ class TestPosNavePayment(TransactionCase):
         registro = next(line for line in logs.output if 'no dio de baja' in line)
         for dato in ('intent-1234', '400', 'Payment request is disabled'):
             self.assertIn(dato, registro)
+
+    # ──────────────────────────────────────────────
+    # ERRORES AL CREAR EL COBRO (H8)
+    # ──────────────────────────────────────────────
+
+    def _send_failing(self, method, status_code, body, json_ok=True):
+        error = self._http_error(status_code, body, json_ok=json_ok)
+        with patch('odoo.addons.pos_nave.models.pos_payment_method.requests.post') as mock_post:
+            mock_post.return_value = MagicMock(raise_for_status=MagicMock(side_effect=error))
+            return method.nave_send_payment_intent(method.id, amount=15.0, reference='POS-H8-001')
+
+    def test_43_invalid_pos_tells_the_cashier_what_to_do(self):
+        """La respuesta real de invalid_pos da un aviso en castellano, con el código para soporte."""
+        qr_method = self._make_qr_method()
+        body = '{"code":"invalid_pos","message":"Given POS is for a different payment type"}'
+
+        with self.assertLogs('odoo.addons.payment_nave.models.payment_provider', level='ERROR') as logs:
+            data = self._send_failing(qr_method, 400, body)
+
+        self.assertTrue(data['error'])
+        self.assertIn("pertenece a otro medio de cobro de Nave", data['message'])
+        self.assertIn("Avisá al administrador", data['message'])
+        self.assertNotIn("Given POS", data['message'], "El texto técnico de Nave no es la explicación")
+        self.assertIn("Para soporte:\nCódigo: invalid_pos\nHTTP: 400", data['message'])
+        registro = ' '.join(r.getMessage() for r in logs.records)
+        self.assertIn("static_qr", registro)
+        self.assertIn("QR-POS-001", registro)
+
+    def test_44_qr_documented_shape_gets_the_same_treatment(self):
+        """Con la forma de los ejemplos del QR, el código viene en `message`."""
+        body = '{"code":"409","message":"NO_GATEWAYS_AVAILABLE","detail":"No gateways available"}'
+        data = self._send_failing(self._make_qr_method(), 409, body)
+
+        self.assertIn("Cobrá por otro medio", data['message'])
+        self.assertIn("Código: NO_GATEWAYS_AVAILABLE", data['message'])
+
+    def test_45_unknown_intent_error_keeps_nave_message(self):
+        """Un código que no está en el catálogo se muestra como hasta ahora."""
+        body = '{"code":"algo_nuevo","message":"Something new happened"}'
+        data = self._send_failing(self.pos_payment_method, 400, body)
+
+        self.assertIn("Something new happened", data['message'])
+        self.assertNotIn("Para soporte", data['message'])
+
+    def test_46_intent_error_without_json_keeps_the_http_hint(self):
+        """Sin JSON, la pista por código HTTP de siempre."""
+        data = self._send_failing(self.pos_payment_method, 503, '<html>caído</html>', json_ok=False)
+
+        self.assertIn("Nave no está respondiendo", data['message'])
