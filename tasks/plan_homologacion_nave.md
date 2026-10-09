@@ -458,6 +458,26 @@ C**: si el dispositivo no responde, con 30 s va a tardar más en fallar y va a f
 Si una vez vinculada la terminal el cobro vuelve a dar timeout con 30 s, es un problema distinto y
 hay que reportárselo a Nave con esta evidencia.
 
+### 3.49 B2c: link de pago Nave desde un pedido de venta, en producción (2026-10-09)
+
+Pedido `S00043`, $246,90, con **⚙ Acción → Generar Link de Pago Nave**. Pagado por QR con Belo.
+Evidencia en `docs/homologacion/evidencias/B2c/`.
+
+| Paso | Resultado |
+|---|---|
+| Asistente | ✅ El link `checkout.ranty.io/nave?payment_request_id=4c6727cb…` se genera por el endpoint `payment_link` con su `pos_id` (06:17:53 UTC), y queda en el asistente y en el chatter |
+| Aviso de Nave | ✅ 06:19:30, `APPROVED`, 200, sin reintentos, aceptado por el control de pertenencia |
+| Transacción | ✅ `S00043` confirmada, medio *QR Interoperable Nave*, con billetera, cupón `IUB792531915` y autorización |
+| Factura | ✅ Al validar `FA-C 00001-00000020`, Odoo registra el pago `PBNK1/2026/00016` y la deja *en proceso de pago* con saldo $0. El pedido avisa *"Factura … pagada"* y el cliente recibe el correo de confirmación |
+
+**Hallazgos:**
+
+- 🔴 **El chatter muestra el HTML crudo del mensaje del link**: se ve
+  `<b>Link de Pago Nave generado:</b><br/><a href=…>`. `_post_link_to_chatter` pasa el cuerpo como
+  texto, y Odoo 18 lo escapa. Hay que armarlo como `Markup`, escapando los valores.
+- El mensaje *"The transaction with reference S00043 … is pending (Nave)"* sale en inglés: le falta la
+  traducción al módulo `payment` del core. No es del módulo.
+
 ### 3.48 Cobro de una factura desde el portal, por link de pago, en producción (2026-10-09)
 
 Factura `FA-C 00001-00000003`, $50. El cliente entró al portal de la factura (*Pagar ahora*), eligió
@@ -2318,7 +2338,7 @@ deciden cómo se escribe el fix de B11.
 | ID | Caso | Pasos | Resultado esperado | Estado |
 |---|---|---|---|---|
 | B1c | Generar link desde factura | Factura confirmada → Acción → Generar Link | Link `https://checkout.ranty.io/link/...` en el wizard y posteado al chatter | ⬜ |
-| B2c | Generar link desde pedido de venta | Ídem sobre `sale.order` | Ídem | ⬜ |
+| B2c | Generar link desde pedido de venta | Ídem sobre `sale.order` | Ídem | ✅ 2026-10-09, producción: link generado, pagado, transacción confirmada y factura con saldo $0. 🔴 El chatter muestra el HTML crudo. §3.49 |
 | B3c | Pago del link → conciliación | Abrir el link en incógnito y pagar | Webhook llega, **factura pasa a Pagada**. 🚫 Hoy: 500 + reintentos + factura impaga (B1) | ✅ 2026-10-09, producción, desde el portal de la factura: aviso aplicado, factura con saldo $0 y pago en Banco. §3.48 |
 | B4c | Duración del link | Probar 24 h, 48 h y 168 h (las tres opciones del panel, §3.9.g) | El link expira al plazo indicado. Verificar el estado que notifica Nave | ⬜ |
 | B5c | Duración inválida | `duration_hours = 0`, negativo, o > 168 | Debería rechazarse; **hoy no hay validación** (`nave_link_wizard.py:71-75`). El tope razonable es 168 h (§3.9.g) | ⬜ |
