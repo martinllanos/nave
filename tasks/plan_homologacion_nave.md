@@ -497,6 +497,26 @@ mensaje en castellano que diga qué pasó y qué hacer, y el código para soport
 de *speak-to-the-cashier-not-the-api*. Los errores que no se pueden provocar se prueban con las
 respuestas documentadas.
 
+**Corregido en `explain-intent-errors-to-the-cashier`** (`payment_nave 18.0.1.12.4`, `pos_nave
+18.0.1.11.3`). Hay un catálogo de los siete errores, que reconoce las dos formas de Nave; lo que no
+está en el catálogo sigue como antes. Lo verifican 9 tests con las respuestas documentadas y la real.
+
+Verificado en producción el 2026-10-09 con un sondeo por shell sin guardar nada: un método QR
+temporal con el `pos_id` de la terminal, descartado al terminar. Nave respondió
+`400 invalid_pos`, y el servidor devolvió al POS:
+
+> El ID del punto de venta de este método de pago pertenece a otro medio de cobro de Nave. Avisá al
+> administrador para que lo corrija en el método de pago.
+>
+> Para soporte: Código: invalid_pos · HTTP: 400
+
+El log registró la respuesta de Nave y el `invalid_pos` con el medio (`static_qr`) y el `pos_id`. La
+prueba en la pantalla del POS se omitió de común acuerdo: con una sesión abierta, Odoo no deja
+modificar el método de pago, y el POS muestra el texto del servidor tal cual.
+
+**Pendiente menor:** el registro de `_nave_log_invalid_pos` dice *"revisá la configuración del
+proveedor"*; en el POS, lo que hay que revisar es el método de pago.
+
 ### 3.42 Cierre de caja y asientos del POS (2026-10-09)
 
 Cierre de la sesión `POS/00001`, abierta desde el 2026-10-06: 16 órdenes por $5.154,34, todas
@@ -2209,7 +2229,7 @@ deciden cómo se escribe el fix de B11.
 | H5 | Pago con billetera real | Escanear el QR físico desde una app | Mismo resultado que H3 | ✅ 2026-10-08, POS 1/0014: Belo mostró los $147 ya cargados, Nave aprobó y Odoo lo registró en la consulta siguiente. Factura `FA-C 00001-00000017`. §3.40 |
 | H6 | Expiración | Crear intención y esperar el `duration_time` | `EXPIRED` manejado sin loop (depende de B11/B4) | ✅ 2026-10-08: `EXPIRED` a los 5 min (19:07:00 → 19:12:03 UTC). *"Cobro expirado"*, línea reintentable, sin loop. §3.40 |
 | H7 | Cancelar intención | Cancelar desde el POS | `DELETE /api/payment_requests/{id}`, el QR deja de cobrar | ✅ 2026-10-08, exploratorio: Nave aceptó la baja de una intención `static_qr` desde Odoo (03:56 UTC). Un QR impreso no tiene pantalla que vuelva a reposo |
-| H8 | Errores propios de QR | Forzar la condición | `ERROR_ENCODE_DYNAMIC_QR` y `NO_GATEWAYS_AVAILABLE` con mensaje claro al cajero (`doc_qr.md` §9) | 🔴 2026-10-09: el cajero ve el error de Nave en inglés y sin indicación de qué hacer. Sólo `invalid_pos` se puede provocar, y la API lo devuelve con otra forma que la documentada. §3.43 |
+| H8 | Errores propios de QR | Forzar la condición | `ERROR_ENCODE_DYNAMIC_QR` y `NO_GATEWAYS_AVAILABLE` con mensaje claro al cajero (`doc_qr.md` §9) | ✅ 2026-10-09, `pos_nave 18.0.1.11.3`: aviso en castellano, con qué hacer y el código para soporte. `invalid_pos` verificado en producción; los otros seis, con las respuestas documentadas. §3.43 |
 | H9 | Devolución | Devolver un pago QR aprobado | `DELETE /api/payments/{payment_id}` → `CANCELLING` → estado final asincrónico | ⬜ |
 | H10 | Path de auth | Capturar el request de token | `doc_qr.md` §2 usa `m2ms`, el código usa `m2msPrivate` (N3) | ✅ 2026-10-08: en producción el token sale de `m2msPrivate` y el QR cobra con él |
 
@@ -2285,7 +2305,7 @@ Lo primero que se presenta a Nave. Lo que queda afuera no se descarta: se homolo
 | Checkout online | A1 a A13, A16 a A18 | ✅ |
 | Nave Point con tarjeta | C0 a C9, C12, C16 | ✅ |
 | Nave Point con *Código QR* en la terminal | C2 con QR | ✅ 2026-10-08, cobro real con MODO (§3.41) |
-| Nave QR fijo | H1 a H8, H10 | ✅ H1, H2, H4 a H7 y H10 (§3.40). Falta H8, los errores propios del QR |
+| Nave QR fijo | H1 a H8, H10 | ✅ H1, H2, H4 a H8 y H10 (§3.40 y §3.43) |
 | Webhook de los pagos del POS | — | ✅ 2026-10-08: responde 200 y Nave no reintenta (§3.39) |
 | Seguridad del webhook | E1c a E3c | ⬜ La restricción de host de `payment_check_url` está en el código; falta la prueba |
 | Robustez del webhook | D2c a D6c | D2c a D4c ✅; D5c y D6c ⬜ |

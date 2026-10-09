@@ -25,7 +25,7 @@
 - [x] 3.2 Correr las suites de `payment_nave` y `pos_nave`, más flake8 y bandit según
       `.agent/rules.md` §6. Verificar: 0 fallos, 0 errores de lint y 0 hallazgos de severidad media o
       superior.
-- [ ] 3.3 Desplegar, verificar versiones y hashes en el contenedor, y provocar `invalid_pos` en
+- [x] 3.3 Desplegar, verificar versiones y hashes en el contenedor, y provocar `invalid_pos` en
       producción. Primero por shell, sin guardar nada: `nave_send_payment_intent` con el `pos_id` de
       la terminal en el método QR, revisando el mensaje devuelto y el log. Después, con el visto bueno
       del usuario, en el POS: el usuario pone el `pos_id` de la terminal en *Nave QR*, intenta un
