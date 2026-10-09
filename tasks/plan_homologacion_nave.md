@@ -482,10 +482,40 @@ diferencia, y el efectivo se contó en lo esperado.
   *Identificar cliente* (`split_transactions`) en los métodos de Nave, Odoo crea un pago por cobro, y
   cada uno se concilia con su acreditación.
 
-Las dos cosas se resuelven en la configuración contable, no en el módulo: un modelo de conciliación
-que lleve la diferencia a una cuenta de comisiones, y *Identificar cliente* en los métodos de Nave.
-Queda para decidir con la homologación. Primero conviene ver en el panel de Nave cómo y cuándo
-liquida los cobros con tarjeta (consulta 7 de la reunión).
+**El resumen del panel de Nave** (*Detalles > Descargar resumen*, Excel, consultado el 2026-10-09).
+Trae una fila por cobro con fecha de operación y de acreditación, código de operación, terminal,
+medio de pago, **monto bruto, comisión, IVA de la comisión y neto**, y el **ID externo de pago**: la
+referencia que manda Odoo, o sea el `uuid` de la línea de pago del POS. El archivo no se guarda en el
+repo, porque trae nombre y CUIT de quien pagó. De las dos filas que cubrió el rango pedido:
+
+| Medio | Bruto | Comisión | IVA comisión | Neto | Acreditación |
+|---|---|---|---|---|---|
+| Dinero en cuenta (Bind) | $15,00 | $0,00 | $0,00 | $15,00 | el mismo día |
+| American Express crédito | $50,00 | $2,40 | $0,50 | $47,10 | el mismo día |
+
+Con los dos QR del 2026-10-08 (§3.40 y §3.41), la comisión fue de ~0,97 %.
+
+**Lo que dice eso:**
+
+- **Nave acredita cada cobro por separado y en el día**, también con tarjeta.
+- **La comisión depende del medio**: va de 0 % a casi 6 % con IVA. Un modelo de conciliación con un
+  porcentaje fijo no sirve. La diferencia exacta de cada cobro está en el resumen.
+- **La comisión lleva IVA discriminado.** Para la contabilidad argentina son dos asientos: el gasto
+  por comisión y el IVA crédito fiscal. No alcanza con mandar la diferencia a una sola cuenta.
+- **El ID externo de pago une el resumen con Odoo.** Es la referencia de cada línea de pago del POS
+  y de cada transacción online.
+
+**Identificar cliente con Consumidor Final:** el core sólo exige que la orden tenga cliente
+(`_askForCustomerIfRequired`), y el POS ya pone *Consumidor Final Anónimo* por defecto, así que el
+cajero no ve ninguna diferencia. Lo que cambia es la contabilidad: un `account.payment` por cobro en
+lugar de uno por sesión. Pero la referencia de ese pago es genérica (*"Nave Point POS payment of
+Consumidor Final Anónimo in POS/00001"*), así que todos se distinguen sólo por el monto, y el banco
+acredita el neto, no el bruto.
+
+**Propuesta:** dejar la conciliación automática para después del MVP. Sería una historia que lea el
+resumen de Nave, o una API si existe (consulta 7), y concilie cada acreditación con su cobro por el
+ID externo, asentando la comisión y su IVA. Para el MVP alcanza con documentar la conciliación manual
+en el manual.
 
 ### 3.41 Nave Point con *Código QR* en la terminal (2026-10-08)
 
